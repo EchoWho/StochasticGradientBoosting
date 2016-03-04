@@ -113,7 +113,7 @@ def predict_layer(pt, child_nodes, top_node):
     top_loss = top_node.loss(partial_sums[-1], pt.y)
     return partial_sums, top_loss
 
-def main(num_pts, num_children, learning_rate=1.5, rand_seed=0):
+def main(num_pts, num_children, learning_rate=1.5, learning_scale=1.0, rand_seed=0):
     top_node= Node(SqLoss, parent=None, name="root", input_dim = 0)
     child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
             for i in xrange(num_children)]
@@ -168,7 +168,7 @@ def main(num_pts, num_children, learning_rate=1.5, rand_seed=0):
         offset_partials[1:] = partial_sums[:-1]
         offset_partials[0] = 0
         dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(offset_partials, child_nodes)]
-        step_size = 1./np.power((i+1), learning_rate)
+        step_size = learning_scale/np.power((i+1), learning_rate)
         learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
                 for (node, loss) in zip(child_nodes, dlosses)])
         if  i < 1 or i == num_pts-1 or (i < num_children and num_children < disp_num_child)\
@@ -189,15 +189,12 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--num_pts', default=4, help='number of data points to run')
     parser.add_argument('-c', '--num_children', default=3, help='number of children learners')
     parser.add_argument('-l', '--learning_rate', default=3.0, help='eta in step_size=1/(i+1)^eta')
+    parser.add_argument('-l2', '--learning_scale', default=1.0, help='eta in step_size=l2*1.0/(i+1)^eta')
     parser.add_argument('-s', '--seed', default=0, help='random seed for data gen')
     args = parser.parse_args()
     num_pts     = int(args.num_pts)
     num_child   = int(args.num_children)
     rand_seed   = int(args.seed)
     learning_rate = float(args.learning_rate)
-    main(num_pts, num_child, learning_rate, rand_seed)
-
-
-
-
-
+    learning_scale = float(args.learning_scale)
+    main(num_pts, num_child, learning_rate, learning_scale, rand_seed)
