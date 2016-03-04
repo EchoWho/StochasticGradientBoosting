@@ -62,7 +62,7 @@ class Node(object):
 
 feature_dim = 1
 def f(x):
-    return 0.25*x  + 1.
+    return 0.25*x
     #return x*x 
 
 # dataset generator function
@@ -89,7 +89,7 @@ def main():
     child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
             for i in xrange(num_child)]
     
-    num_pts = 60 
+    num_pts = 10 
     for i,pt in enumerate(dataset(num_pts, seed=1)):
         print('Iteration {}/{}'.format(i+1, num_pts))
         # predict up
