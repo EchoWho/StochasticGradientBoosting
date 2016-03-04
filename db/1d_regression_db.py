@@ -98,7 +98,7 @@ def main():
     child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
             for i in xrange(num_child)]
     
-    num_pts =  50
+    num_pts =  4
     for i,pt in enumerate(dataset(num_pts, seed=1)):
         print('Iteration {}/{}: (x={:.4g},y={:.4g})'.format(i+1, num_pts, pt.x, pt.y))
         # predict up
@@ -112,8 +112,10 @@ def main():
         print '  Partial sums: \t {}'.format(partial_sums)
         # get the gradient of the top loss at each partial sum
         true_val = pt.y 
+        partial_sums[2:] = partial_sums[1:-1]
+        partial_sums[0] = 0
         dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(partial_sums, child_nodes)]
-        step_size = 1./np.power((i+1), 1.1)
+        step_size = 1./np.power((i+1), 1.0)
         learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
                 for (node, loss) in zip(child_nodes, dlosses)])
         print ' Took descent step of step size {:.4g}...'.format(step_size)
