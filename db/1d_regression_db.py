@@ -62,17 +62,18 @@ class Node(object):
         pred = partial(self._predict, x=x)
         param_grad_func = nd.Derivative(pred)
         grad = param_grad_func(self.w)
-        self.w = self.w - step_size*grad.dot(loss)
+        self.w = self.w - step_size*grad*loss
         return self.w
     @staticmethod
     def _predict(w, x):
         return w.dot(x)
+        #return w.dot(x*x)
 
 
 feature_dim = 1
 def f(x):
     return 0.25*x
-    #return x*x 
+    #return 1e-1*x*x 
 
 # dataset generator function
 def dataset(num_pts, seed=0):
@@ -92,39 +93,60 @@ def compute_running_average(nodes, predictions):
         partial_sums[i] = (1.-weights[i]) * partial_sums[i-1] + weights[i]*predictions[i]
     return partial_sums
 
-def main():
+def predict_layer(pt, child_nodes, top_node):
+    """
+    :param pt - DataPt object that has .x and .y
+    """
+    # predict up
+    predictions = np.array([node.predict(pt.x) for node in child_nodes])
+    # compute running average
+    partial_sums = compute_running_average(child_nodes, predictions)
+    top_loss = top_node.loss(partial_sums[-1], pt.y)
+    return partial_sums, top_loss
+
+def main(num_pts, num_children, learning_rate=3.0, rand_seed=0):
     top_node= Node(SqLoss, parent=None, name="root", input_dim = 0)
-    num_child = 3
     child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
-            for i in xrange(num_child)]
+            for i in xrange(num_children)]
     
-    num_pts =  4
-    for i,pt in enumerate(dataset(num_pts, seed=1)):
+    validation_set = [pt for pt in dataset(num_pts, seed=rand_seed+1)]
+
+    for i,pt in enumerate(dataset(num_pts, seed=rand_seed)):
         print('Iteration {}/{}: (x={:.4g},y={:.4g})'.format(i+1, num_pts, pt.x, pt.y))
-        # predict up
-        predictions = np.array([node.predict(pt.x) for node in child_nodes])
-        # compute running average
-        partial_sums = compute_running_average(child_nodes, predictions)
-        top_loss = top_node.loss(partial_sums[-1], pt.y)
+        # Compute loss on Validation set
+        val_losses = [predict_layer(val_pt, child_nodes, top_node)[1] for val_pt in validation_set]
+        avg_val_loss = np.mean(val_losses)
+        print ' Avg validation loss on pt: {:.4g}'.format(avg_val_loss)
+        # Compute the partial sums, loss on current data point 
+        partial_sums, top_loss = predict_layer(pt, child_nodes, top_node)
         print ' Top layer loss on pt: {:.4g}'.format(top_loss)
         learner_weights = np.array([node.w for node in child_nodes])
         print '  Child learner weights: {}'.format(learner_weights.ravel())
-        print '  Partial sums: \t {}'.format(partial_sums)
+        print '  Partial sums: {}'.format(partial_sums)
         # get the gradient of the top loss at each partial sum
         true_val = pt.y 
-        partial_sums[2:] = partial_sums[1:-1]
+        partial_sums[1:] = partial_sums[:-1]
         partial_sums[0] = 0
         dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(partial_sums, child_nodes)]
-        step_size = 1./np.power((i+1), 1.0)
+        step_size = 1./np.power((i+1), learning_rate)
         learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
                 for (node, loss) in zip(child_nodes, dlosses)])
         print ' Took descent step of step size {:.4g}...'.format(step_size)
 
         
-    
-
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser("1d Online Gradient Boosting")
+    parser.add_argument('-n', '--num_pts', default=4, help='number of data points to run')
+    parser.add_argument('-c', '--num_children', default=3, help='number of children learners')
+    parser.add_argument('-l', '--learning_rate', default=3.0, help='eta in step_size=1/(i+1)^eta')
+    parser.add_argument('-s', '--seed', default=0, help='random seed for data gen')
+    args = parser.parse_args()
+    num_pts     = int(args.num_pts)
+    num_child   = int(args.num_children)
+    rand_seed   = int(args.seed)
+    learning_rate = float(args.learning_rate)
+    main(num_pts, num_child, learning_rate, rand_seed)
 
 
 
