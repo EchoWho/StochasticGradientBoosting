@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-from math import ceil, floor
 from collections import namedtuple
+from functools import partial
+import matplotlib.pyplot as plt
+from math import ceil, floor, sqrt
+import numpy as np
+import numdifftools as nd
+
 
 from collections import namedtuple
 DataPt = namedtuple('DataPt', ['x','y'])
@@ -45,7 +47,7 @@ class Node(object):
         self.loss_obj = loss_obj
         self.w = np.zeros(input_dim)
     def predict(self, x):
-        return self.w.dot(x)
+        return Node._predict(self.w, x)
     def dloss(self, val, true_val):
         # need to compute the gradient wrt parent also
         if self.parent is None:
@@ -57,7 +59,14 @@ class Node(object):
     def loss(self, val, true_val):
         return self.loss_obj.loss(val, true_val)
     def grad_step(self, x, loss, step_size):
-        self.w = self.w - step_size*loss*x
+        pred = partial(self._predict, x=x)
+        param_grad_func = nd.Derivative(pred)
+        grad = param_grad_func(self.w)
+        self.w = self.w - step_size*grad.dot(loss)
+        return self.w
+    @staticmethod
+    def _predict(w, x):
+        return w.dot(x)
 
 
 feature_dim = 1
@@ -80,7 +89,7 @@ def compute_running_average(nodes, predictions):
     partial_sums = np.zeros(num_nodes) 
     partial_sums[0] = predictions[0]
     for i in xrange(1,num_nodes):
-        partial_sums[i] = (1.-weights[i]) * partial_sums[i-1] + predictions[i]
+        partial_sums[i] = (1.-weights[i]) * partial_sums[i-1] + weights[i]*predictions[i]
     return partial_sums
 
 def main():
@@ -89,9 +98,9 @@ def main():
     child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
             for i in xrange(num_child)]
     
-    num_pts = 10 
+    num_pts =  50
     for i,pt in enumerate(dataset(num_pts, seed=1)):
-        print('Iteration {}/{}'.format(i+1, num_pts))
+        print('Iteration {}/{}: (x={:.4g},y={:.4g})'.format(i+1, num_pts, pt.x, pt.y))
         # predict up
         predictions = np.array([node.predict(pt.x) for node in child_nodes])
         # compute running average
@@ -99,12 +108,14 @@ def main():
         top_loss = top_node.loss(partial_sums[-1], pt.y)
         print ' Top layer loss on pt: {:.4g}'.format(top_loss)
         learner_weights = np.array([node.w for node in child_nodes])
-        print ' Current child weights: {}'.format(learner_weights.ravel())
+        print '  Child learner weights: {}'.format(learner_weights.ravel())
+        print '  Partial sums: \t {}'.format(partial_sums)
         # get the gradient of the top loss at each partial sum
         true_val = pt.y 
         dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(partial_sums, child_nodes)]
         step_size = 1./np.power((i+1), 1.1)
-        [node.grad_step(pt.x, loss, step_size) for (node, loss) in zip(child_nodes, dlosses)]
+        learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
+                for (node, loss) in zip(child_nodes, dlosses)])
         print ' Took descent step of step size {:.4g}...'.format(step_size)
 
         
