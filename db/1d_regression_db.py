@@ -3,9 +3,11 @@
 from collections import namedtuple
 from functools import partial
 import matplotlib.pyplot as plt
-from math import ceil, floor, sqrt
+from math import ceil, floor, sqrt, cos, sin
 import numpy as np
 import numdifftools as nd
+
+from timer import Timer
 
 
 from collections import namedtuple
@@ -40,14 +42,21 @@ class EpsilonInsensitive(object):
 SqLoss = SquaredLoss()
 EpsInsensitive = EpsilonInsensitive(1e-2)
 
+def linear_features(w, x):
+    return w.dot(x)
+def square_features(w, x):
+    return w.dot(x*x)
+
 class Node(object):
-    def __init__(self, loss_obj, parent=None, name="NoName", input_dim = 0):
+    def __init__(self, loss_obj, parent=None, name="NoName", input_dim = 0,
+            predict_func=linear_features):
         self.parent = parent
         self.name = name
         self.loss_obj = loss_obj
         self.w = np.zeros(input_dim)
+        self.predict_func = predict_func
     def predict(self, x):
-        return Node._predict(self.w, x)
+        return self.predict_func(self.w, x)
     def dloss(self, val, true_val):
         # need to compute the gradient wrt parent also
         if self.parent is None:
@@ -59,21 +68,19 @@ class Node(object):
     def loss(self, val, true_val):
         return self.loss_obj.loss(val, true_val)
     def grad_step(self, x, loss, step_size):
-        pred = partial(self._predict, x=x)
+        pred = partial(self.predict_func, x=x)
         param_grad_func = nd.Derivative(pred)
         grad = param_grad_func(self.w)
         self.w = self.w - step_size*grad*loss
         return self.w
-    @staticmethod
-    def _predict(w, x):
-        return w.dot(x*x)
-        #return w.dot(x*x)
 
 
 feature_dim = 1
 def f(x):
-    #return 0.25*x
-    return 1e-1*x*x 
+    return 0.25*x
+    #return 1e-2*x*x  + 5.00*x
+    #return 1e0*x*x  + 5.00*x
+    #return cos(x) + 2.*x*sin(x)
 
 # dataset generator function
 def dataset(num_pts, seed=0):
@@ -99,6 +106,8 @@ def predict_layer(pt, child_nodes, top_node):
     """
     # predict up
     predictions = np.array([node.predict(pt.x) for node in child_nodes])
+    #helper = lambda node : node.predict(pt.x)
+    #predictions = np.array(p.map(helper, child_nodes))
     # compute running average
     partial_sums = compute_running_average(child_nodes, predictions)
     top_loss = top_node.loss(partial_sums[-1], pt.y)
@@ -108,33 +117,69 @@ def main(num_pts, num_children, learning_rate=1.5, rand_seed=0):
     top_node= Node(SqLoss, parent=None, name="root", input_dim = 0)
     child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
             for i in xrange(num_children)]
-    
-    validation_set = [pt for pt in dataset(num_pts, seed=rand_seed+1)]
+    #child_nodes = []
+    #for i in xrange(num_children):
+    #    func = linear_features
+    #    if i % 2 == 0:
+    #        func = square_features 
+    #    child_nodes.append(Node(None, parent=top_node, input_dim=feature_dim, predict_func=func,
+    #        name='Child {:d}'.format(i))) 
+        
+    validation_set = [pt for pt in dataset(500, seed=rand_seed+1)]
+
+    batch_set = [pt for pt in dataset(num_pts, seed=rand_seed)]
+    from sklearn.linear_model.ridge import Ridge
+    batch_learner = Ridge(alpha=1e-15, fit_intercept=False) 
+    batch_learner.fit(np.vstack([pt.x for pt in batch_set]), np.array([pt.y for pt in batch_set]))
+    batch_pred = batch_learner.predict(np.vstack([pt.x for pt in validation_set]))
+    Yval = np.array([pt.y for pt in validation_set])
+    err = batch_pred - Yval; mean_batch_err = np.mean(np.sqrt(err*err))
+    print('Batch err: {:.4g}'.format(mean_batch_err))
+
 
     npprint = partial(np.array_str, precision = 3)
 
+    multiprocess = num_children >= 75
+    if multiprocess:
+        from pathos.multiprocessing import ProcessingPool as Pool
+        from pathos.multiprocessing import cpu_count
+        p = Pool(int(ceil(0.75*cpu_count())))
+        val_helper = partial(predict_layer, child_nodes=child_nodes, top_node=top_node)
+
+    disp_num_child = 15
+    if num_children < disp_num_child:
+        learner_weights = np.array([node.w for node in child_nodes])
+        print('Child learner weights: {}'.format(npprint(learner_weights.ravel())))
+
+    print 'Starting Online Boosting...'
     for i,pt in enumerate(dataset(num_pts, seed=rand_seed)):
         # Compute loss on Validation set
-        val_losses = [predict_layer(val_pt, child_nodes, top_node)[1] for val_pt in validation_set]
+        if multiprocess:
+            val_results = p.map(val_helper, validation_set); _, val_losses = zip(*val_results)
+        else:
+            val_losses = [predict_layer(val_pt, child_nodes, top_node)[1] for val_pt in validation_set]
         avg_val_loss = np.mean(val_losses)
         # Compute the partial sums, loss on current data point 
         partial_sums, top_loss = predict_layer(pt, child_nodes, top_node)
-        learner_weights = np.array([node.w for node in child_nodes])
+
         # get the gradient of the top loss at each partial sum
         true_val = pt.y 
-        offset_partials = np.zeros(partial_sums.shape) + np.NaN
+        offset_partials = partial_sums.copy()
         offset_partials[1:] = partial_sums[:-1]
         offset_partials[0] = 0
-        dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(partial_sums, child_nodes)]
+        dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(offset_partials, child_nodes)]
         step_size = 1./np.power((i+1), learning_rate)
         learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
                 for (node, loss) in zip(child_nodes, dlosses)])
-        if i % ceil(num_pts*0.1) == 0 or i == num_pts-1:
+        if  i < 1 or i == num_pts-1 or (i < num_children and num_children < disp_num_child)\
+                or i % min(int(ceil(num_pts*0.05)),25) == 0:
             print('Iteration {:d}/{:d}: (x={:.2g},y={:.2g})'.format(i+1, num_pts, pt.x, pt.y))
-            print(' Avg validation loss on pt: {:.4g}'.format(avg_val_loss))
+            print(' Avg validation loss on pt: {:.4g} vs Batch: {:.4g}'.format(avg_val_loss,
+                mean_batch_err))
             print('  Top layer loss on pt: {:.4g}'.format(top_loss))
-            print('  Child learner weights: {}'.format(npprint(learner_weights.ravel())))
-            print('  Partial sums: {}'.format(npprint(partial_sums)))
+            if num_children < disp_num_child:
+                print('  Child learner weights: {}'.format(npprint(learner_weights.ravel())))
+                print('  Partial sums: {}'.format(npprint(partial_sums)))
             print('  Took descent step of step size {:.4g}...'.format(step_size))
 
         
