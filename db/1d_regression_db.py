@@ -66,14 +66,14 @@ class Node(object):
         return self.w
     @staticmethod
     def _predict(w, x):
-        return w.dot(x)
+        return w.dot(x*x)
         #return w.dot(x*x)
 
 
 feature_dim = 1
 def f(x):
-    return 0.25*x
-    #return 1e-1*x*x 
+    #return 0.25*x
+    return 1e-1*x*x 
 
 # dataset generator function
 def dataset(num_pts, seed=0):
@@ -104,34 +104,38 @@ def predict_layer(pt, child_nodes, top_node):
     top_loss = top_node.loss(partial_sums[-1], pt.y)
     return partial_sums, top_loss
 
-def main(num_pts, num_children, learning_rate=3.0, rand_seed=0):
+def main(num_pts, num_children, learning_rate=1.5, rand_seed=0):
     top_node= Node(SqLoss, parent=None, name="root", input_dim = 0)
     child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
             for i in xrange(num_children)]
     
     validation_set = [pt for pt in dataset(num_pts, seed=rand_seed+1)]
 
+    npprint = partial(np.array_str, precision = 3)
+
     for i,pt in enumerate(dataset(num_pts, seed=rand_seed)):
-        print('Iteration {}/{}: (x={:.4g},y={:.4g})'.format(i+1, num_pts, pt.x, pt.y))
         # Compute loss on Validation set
         val_losses = [predict_layer(val_pt, child_nodes, top_node)[1] for val_pt in validation_set]
         avg_val_loss = np.mean(val_losses)
-        print ' Avg validation loss on pt: {:.4g}'.format(avg_val_loss)
         # Compute the partial sums, loss on current data point 
         partial_sums, top_loss = predict_layer(pt, child_nodes, top_node)
-        print ' Top layer loss on pt: {:.4g}'.format(top_loss)
         learner_weights = np.array([node.w for node in child_nodes])
-        print '  Child learner weights: {}'.format(learner_weights.ravel())
-        print '  Partial sums: {}'.format(partial_sums)
         # get the gradient of the top loss at each partial sum
         true_val = pt.y 
-        partial_sums[1:] = partial_sums[:-1]
-        partial_sums[0] = 0
+        offset_partials = np.zeros(partial_sums.shape) + np.NaN
+        offset_partials[1:] = partial_sums[:-1]
+        offset_partials[0] = 0
         dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(partial_sums, child_nodes)]
         step_size = 1./np.power((i+1), learning_rate)
         learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
                 for (node, loss) in zip(child_nodes, dlosses)])
-        print ' Took descent step of step size {:.4g}...'.format(step_size)
+        if i % ceil(num_pts*0.1) == 0 or i == num_pts-1:
+            print('Iteration {:d}/{:d}: (x={:.2g},y={:.2g})'.format(i+1, num_pts, pt.x, pt.y))
+            print(' Avg validation loss on pt: {:.4g}'.format(avg_val_loss))
+            print('  Top layer loss on pt: {:.4g}'.format(top_loss))
+            print('  Child learner weights: {}'.format(npprint(learner_weights.ravel())))
+            print('  Partial sums: {}'.format(npprint(partial_sums)))
+            print('  Took descent step of step size {:.4g}...'.format(step_size))
 
         
 if __name__ == "__main__":
