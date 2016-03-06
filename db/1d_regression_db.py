@@ -15,6 +15,22 @@ DataPt = namedtuple('DataPt', ['x','y'])
 
 from IPython import embed
 
+FEATURE_DIM = 1
+MAX_X = 5
+def f(x):
+    #return 0.25*x
+    #return 1e-2*x*x  + 5.00*x
+    #return 1e0*x*x  + 5.00*x
+    return 8.*cos(x) + 2.5*x*sin(x) + 2.8*x
+
+# dataset generator function
+def dataset(num_pts, seed=0):
+    np.random.seed(seed)
+    for _ in xrange(num_pts):
+        x = -MAX_X+2.*MAX_X*np.random.rand(1)[0]
+        y = f(x)
+        yield DataPt(x,y)
+
 # from sgd_fast sklearn source
 class SquaredLoss(object):
     """Squared loss traditional used in linear regression."""
@@ -47,14 +63,18 @@ def linear_features(w, x):
 def square_features(w, x):
     return w.dot(x*x)
 
+def threshold_func(w, x, thresh):
+    return w.dot(x > thresh)
+
 class Node(object):
     def __init__(self, loss_obj, parent=None, name="NoName", input_dim = 0,
-            predict_func=linear_features):
+            predict_func=None):
         self.parent = parent
         self.name = name
         self.loss_obj = loss_obj
         self.w = np.zeros(input_dim)
-        self.predict_func = predict_func
+        if predict_func is None:
+            self.predict_func = partial(threshold_func, thresh=-(1.1*MAX_X)+2.*(1.1*MAX_X)*np.random.rand(1))
     def predict(self, x):
         return self.predict_func(self.w, x)
     def dloss(self, val, true_val):
@@ -75,21 +95,6 @@ class Node(object):
         return self.w
 
 
-feature_dim = 1
-def f(x):
-    #return 0.25*x
-    #return 1e-2*x*x  + 5.00*x
-    #return 1e0*x*x  + 5.00*x
-    return 8.*cos(x) + 2.5*x*sin(x) + 2.8*x
-
-# dataset generator function
-def dataset(num_pts, seed=0):
-    max_x = 5
-    np.random.seed(seed)
-    for _ in xrange(num_pts):
-        x = -max_x+2.*max_x*np.random.rand(1)[0]
-        y = f(x)
-        yield DataPt(x,y)
 
 def compute_running_average(nodes, predictions):
     num_nodes = len(nodes)
@@ -115,14 +120,14 @@ def predict_layer(pt, child_nodes, top_node):
 
 def main(num_pts, num_children, learning_rate=1.5, learning_scale = 0.8, rand_seed=0):
     top_node= Node(SqLoss, parent=None, name="root", input_dim = 0)
-    child_nodes= [Node(SqLoss, parent=top_node, input_dim = feature_dim, name='Child {:d}'.format(i))\
+    child_nodes= [Node(SqLoss, parent=top_node, input_dim = FEATURE_DIM, name='Child {:d}'.format(i))\
             for i in xrange(num_children)]
     #child_nodes = []
     #for i in xrange(num_children):
     #    func = linear_features
     #    if i % 2 == 0:
     #        func = square_features 
-    #    child_nodes.append(Node(None, parent=top_node, input_dim=feature_dim, predict_func=func,
+    #    child_nodes.append(Node(None, parent=top_node, input_dim=FEATURE_DIM, predict_func=func,
     #        name='Child {:d}'.format(i))) 
         
     validation_set = [pt for pt in dataset(500, seed=rand_seed+1)]
