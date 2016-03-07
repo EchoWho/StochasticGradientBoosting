@@ -138,7 +138,9 @@ def main(num_pts, num_children, learning_rate=1.5, learning_scale = 0.8, rand_se
     batch_learner.fit(np.vstack([pt.x for pt in batch_set]), np.array([pt.y for pt in batch_set]))
     batch_pred = batch_learner.predict(np.vstack([pt.x for pt in validation_set]))
     Yval = np.array([pt.y for pt in validation_set])
-    err = batch_pred - Yval; mean_batch_err = np.mean(np.sqrt(err*err))
+    # THIS HAS TO BE THE SAME LOSS AS THE TOP NODE!
+    mean_batch_err = np.mean([top_node.loss(pred, val) for (pred,val) in zip(batch_pred, Yval)]) 
+    #err = batch_pred - Yval; mean_batch_err = np.mean(0.5*err*err)
     print('Batch err: {:.4g}'.format(mean_batch_err))
 
 
@@ -148,7 +150,8 @@ def main(num_pts, num_children, learning_rate=1.5, learning_scale = 0.8, rand_se
     if multiprocess:
         from pathos.multiprocessing import ProcessingPool as Pool
         from pathos.multiprocessing import cpu_count
-        p = Pool(int(ceil(0.75*cpu_count())))
+        #p = Pool(int(ceil(0.75*cpu_count())))
+        p = Pool(cpu_count())
         val_helper = partial(predict_layer, child_nodes=child_nodes, top_node=top_node)
 
     learner_weights = np.array([node.w for node in child_nodes])
@@ -182,7 +185,7 @@ def main(num_pts, num_children, learning_rate=1.5, learning_scale = 0.8, rand_se
         learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
                 for (node, loss) in zip(child_nodes, dlosses)])
         if  i < 1 or i == num_pts-1 or (i < num_children and num_children < disp_num_child)\
-                or i % min(int(ceil(num_pts*0.05)),25) == 0:
+                or i % min(int(ceil(num_pts*0.05)),25) == 0 or avg_val_loss > 1e3:
             print('Iteration {:d}/{:d}: (x={:.2g},y={:.2g})'.format(i+1, num_pts, pt.x, pt.y))
             print(' Avg validation loss on pt: {:.4g} vs Batch: {:.4g}'.format(avg_val_loss,
                 mean_batch_err))
