@@ -94,8 +94,6 @@ class Node(object):
         self.w = self.w - step_size*grad*loss
         return self.w
 
-
-
 def compute_running_average(nodes, predictions):
     num_nodes = len(nodes)
     weights = [2./(i+1.) for i in xrange(1, num_nodes+1)]
