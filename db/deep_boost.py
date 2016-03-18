@@ -16,10 +16,11 @@ MAX_X=5
 def dataset(num_pts, f, seed=None):
     if seed is not None:
       np.random.seed(seed)
-    for _ in xrange(num_pts):
+    for _ in xrange(num_pts-1):
         x = -MAX_X+2.*MAX_X*np.random.rand(1)[0]
         y = f(x)
         yield DataPt(np.array([x]),y)
+    yield DataPt(np.array([1]), f(1))
 
 
 # from sgd_fast sklearn source
@@ -62,28 +63,42 @@ class BoostNode(object):
     self.mean_func = mean_func
     self.children = children
     self.children_indices = children_indices
+    self.n_children = len(self.children_indices)
+    self.eta = 2.0/self.n_children
+    self.sigma = np.zeros(self.n_children)
 
   def compute_partial_sum(self, children_pred):
     psum = [0.]
     for i, ci in enumerate(self.children_indices):
+      ## Algo 2. of Online Gradient Boosting.
       #wgt = 2./(i+2.)
       #psum.append(psum[-1]*(1.-wgt) + wgt*children_pred[ci])
-      wgt = 2./(i+2.)
-      psum.append(psum[-1] + wgt*children_pred[ci])
+      
+      ## No shrinking of the old
+      #wgt = 2./(i+2.)
+      #psum.append(psum[-1] + wgt*children_pred[ci])
+
+      ## Algo 1. of Online Gradient Boositng
+      psum.append(psum[-1]*(1-self.sigma[i]*self.eta) + self.eta*children_pred[ci])
     return psum 
 
   def predict(self, children_pred):
     psum = self.compute_partial_sum(children_pred)
     return psum[-1]
     
-  def compute_ys(self, children_pred, y):
+  def learn(self, children_pred, y, step_size=1.0):
     psum = self.compute_partial_sum(children_pred)
-    ci_ys = [ (ci, -self.loss_obj.dloss(psum[i], y) * self.mean_func.dmean(psum[i])) \
+    ys = [ -self.loss_obj.dloss(psum[i], y) * self.mean_func.dmean(psum[i]) \
         for i, ci in enumerate(self.children_indices) ]
+
+    self.sigma += step_size*np.array(psum[0:-1])*np.array(ys).ravel()
+    self.sigma = np.maximum(np.minimum(self.sigma, 1), 0)
+
     print 'y   : {}'.format(npprint(y))
     print 'psum: {}'.format(npprint(np.array(psum)))
-    print 'ys:   {}'.format(npprint(np.array([y[0] for (ci, y) in ci_ys])))
-    return ci_ys
+    print 'ys:   {}'.format(npprint(np.array([y[0] for y in ys])))
+    print 'sig : {}'.format(npprint(self.sigma))
+    return self.children_indices, ys
   
 class RegressionNode(object):
   def __init__(self, name, loss_obj, mean_func, input_dim):
@@ -91,14 +106,17 @@ class RegressionNode(object):
     self.loss_obj = loss_obj
     self.mean_func = mean_func
     self.w = np.zeros(input_dim)
+    self.b = 0
 
   def predict(self, x):
-    return self.mean_func.mean(np.dot(self.w, x))
+    return self.mean_func.mean(np.dot(self.w, x)+self.b)
 
   def learn(self, x, y, step_size=1.0, p=None):
     if p is None:
       p = self.predict(x)
-    self.w -= step_size * self.loss_obj.dloss(p, y) * self.mean_func.dmean(p) * x
+    grad = step_size * self.loss_obj.dloss(p, y) * self.mean_func.dmean(p)
+    self.w -= grad*x
+    self.b -= grad
   
 class DeepBoostGraph(object):
   def __init__(self, n_lvls, n_nodes, input_dim, loss_obj, mean_func):
@@ -125,7 +143,8 @@ class DeepBoostGraph(object):
       children_pred = [node.predict(children_pred) for (ni, node) in enumerate(self.nodes[i])] 
     return children_pred[0]
 
-  def predict_and_learn(self, x, y, step_size=1.0):
+  def predict_and_learn(self, x, y, step_size=1.0, boost_step_scale=1e-2, 
+        regress_step_scale=1.0):
     children_preds = []
     for i in range(self.n_lvls):
       if i==0:
@@ -140,17 +159,19 @@ class DeepBoostGraph(object):
         ys_i = []
         for (ni, node) in enumerate(self.nodes[i]):
           print "x   : {}".format(x)
-          ci_ys = node.compute_ys(children_preds[i-1], ys[ni])
-          ys_ni = [ y  for (ci, y) in ci_ys ] 
+          child_idx, ys_ni = node.learn(children_preds[i-1], ys[ni], 
+              boost_step_scale*step_size)
           ys_i = ys_i + ys_ni
         ys = ys_i
       else:
         for (ni, node) in enumerate(self.nodes[i]):
-          node.learn(x, ys[ni], step_size, p=children_preds[0][ni])
+          node.learn(x, ys[ni], regress_step_scale*step_size, p=children_preds[0][ni])
           
         
         ws = np.array([node.w for node in self.nodes[i]]).ravel()
         print 'w   : {}'.format(npprint(ws))
+        bs = np.array([node.b for node in self.nodes[i]]).ravel()
+        print 'b   : {}'.format(npprint(bs))
 
     return children_preds[-1][0]
 
@@ -165,9 +186,9 @@ def main():
   
   dbg = DeepBoostGraph(n_lvls, n_nodes, input_dim, loss_obj, mean_func)
 
-  f = lambda x : np.dot(np.array([1.0]), x)
+  f = lambda x : mean_func[0].mean(np.dot(np.array([1.0]), x))
   
-  train_set = [pt for pt in dataset(200, f, 91612)]
+  train_set = [pt for pt in dataset(500, f, 91612)]
   val_set = [pt for pt in dataset(200, f)]
 
   max_epoch = 1
@@ -175,7 +196,7 @@ def main():
   for epoch in range(max_epoch):
     for (si, pt) in enumerate(train_set):
       t+=1
-      dbg.predict_and_learn(pt.x, pt.y, 1.1/np.power(t+1,0.5))
+      dbg.predict_and_learn(pt.x, pt.y, 1.0/np.power(t+1,0.5))
 
       if si%10==0:
         avg_loss = 0
