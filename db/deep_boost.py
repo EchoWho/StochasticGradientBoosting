@@ -75,11 +75,11 @@ class BoostNode(object):
       #psum.append(psum[-1]*(1.-wgt) + wgt*children_pred[ci])
       
       ## No shrinking of the old
-      #wgt = 2./(i+2.)
-      #psum.append(psum[-1] + wgt*children_pred[ci])
+      wgt = 2./(i+2.)
+      psum.append(psum[-1] + wgt*children_pred[ci])
 
       ## Algo 1. of Online Gradient Boositng
-      psum.append(psum[-1]*(1-self.sigma[i]*self.eta) + self.eta*children_pred[ci])
+      #psum.append(psum[-1]*(1-self.sigma[i]*self.eta) + self.eta*children_pred[ci])
     return psum 
 
   def predict(self, children_pred):
