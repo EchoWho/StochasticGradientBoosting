@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 
 import numpy as np
+import matplotlib.pyplot as plt
 from functools import partial
 from math import ceil, floor, sqrt, cos, sin
 from timer import Timer
 
 from collections import namedtuple
 DataPt = namedtuple('DataPt', ['x','y'])
+
+from IPython import embed
 
 npprint = partial(np.array_str, precision = 3)
 
@@ -31,6 +34,16 @@ class SquaredLoss(object):
   def dloss(self, p, y):
     """ p is the prediction, y is the true value"""
     return p - y
+
+class ReLuMean(object):
+  def mean(self, x):
+      if x < 0:
+          return 0.5*x
+      return x
+  def dmean(self, x): 
+    if x < 0:
+        return 0.5
+    return 1.
 
 class LinearMean(object):
   def mean(self, x):
@@ -99,13 +112,13 @@ class BoostNode(object):
     psum = self.compute_partial_sum(children_pred)
     return self.mean_func.mean(psum[-1])
     
-  def children_targets(self, children_pred, y):
+  def get_targets_and_update(self, children_pred, y, step_size=1.0):
     # prediction
     psum = self.compute_partial_sum(children_pred)
     yps = [ self.mean_func.mean(ps) for ps in psum ]
     # children targets for continued learning
     yts = [ -self.loss_obj.dloss(yps[i], y) * self.mean_func.dmean(psum[i]) \
-        for i in range(self.n_children) ]
+        for i in range(self.n_children+1) ]
 
 #    print 'y   : {}'.format(npprint(y))
 #    print 'psum: {}'.format(npprint(np.array(psum)))
@@ -114,13 +127,19 @@ class BoostNode(object):
 
     assert( not np.isinf(yts[-1]))
     assert( not np.isnan(yts[-1]))
-    return self.children_indices, yts
 
-  def update_weights(self, children_pred, y_tgts, step_size=1.0):
     for i in range(self.n_children):
-      sgn_tgt = y_tgts[i] > -1e-16
-      sgn_pred = children_pred[self.children_indices[i]] > -1e-16
-      self.weights[i] -= (np.float64(sgn_tgt == sgn_pred) -0.5) * step_size
+      #sgn_tgt = yts[i] > -1e-16
+      #sgn_pred = children_pred[self.children_indices[i]] > -1e-16
+      #self.weights[i] -= (np.float64(sgn_tgt == sgn_pred) -0.5) * step_size
+      #self.weights[i] -= yts[i+1] * children_pred[self.children_indices[i]] * step_size
+      #self.weights[i] -= yts[-1] * children_pred[self.children_indices[i]] * step_size
+      #grad = yts[-1] * children_pred[self.children_indices[i]] 
+      #grad_sign = np.sign(grad)[0]
+      #self.weights[i] -= grad_sign * step_size
+      self.weights[i] = 2./(i+1.)
+
+    return self.children_indices, yts[:-1]
   
 class RegressionNode(object):
   def __init__(self, name, loss_obj, mean_func, input_dim):
@@ -151,11 +170,11 @@ class DeepBoostGraph(object):
     self.nodes = []
     for i in range(n_lvls):
       if i == 0:
-        lvl_nodes = [RegressionNode('n_{}_{}'.format(i, ni), loss_obj[i], mean_func[i], input_dim)  \
+        lvl_nodes = [RegressionNode('n_{}_{}'.format(i, ni), loss_obj[i], mean_func[i](), input_dim)  \
           for ni in range(n_nodes[i])]
       else:
         children_indices = np.reshape(np.arange(n_nodes[i-1]), (n_nodes[i], n_nodes[i-1]/n_nodes[i]))
-        lvl_nodes = [BoostNode('n_{}_{}'.format(i, ni), loss_obj[i], mean_func[i], self.nodes[-1], \
+        lvl_nodes = [BoostNode('n_{}_{}'.format(i, ni), loss_obj[i], mean_func[i](), self.nodes[-1], \
           children_indices[ni].ravel()) for ni in range(n_nodes[i])]
       self.nodes.append(lvl_nodes)
 
@@ -180,9 +199,9 @@ class DeepBoostGraph(object):
         ys_i = []
         for (ni, node) in enumerate(self.nodes[i]):
 #          print "x   : {}".format(x)
-          child_idx, ys_ni = node.children_targets(children_preds[i-1], ys[ni]) 
-          node.update_weights(children_preds[i-1], ys_ni, boost_step_size) 
+          child_idx, ys_ni = node.get_targets_and_update(children_preds[i-1], ys[ni], boost_step_size) 
           ys_i = ys_i + ys_ni
+          #ys_i.extend(ys_ni) 
         ys = ys_i
       else:
         for (ni, node) in enumerate(self.nodes[i]):
@@ -198,24 +217,31 @@ class DeepBoostGraph(object):
     return children_preds[-1][0]
 
 def main():
-  n_lvls = 3 
   #n_nodes = [9**i for i in reversed(range(n_lvls))]
-  n_nodes = [100, 20, 1]
+  #n_nodes = [100, 20, 1]
+  n_nodes = [100, 1]
+  n_lvls =  len(n_nodes)
   sq_loss = SquaredLoss()
   loss_obj = [SquaredLoss() for i in range(n_lvls)]
 #  mean_func = [SignedSquareMean(), GatedSignedSquareRootMean(), SignedSquareMean()]
-  mean_func = [LinearAddSigmoidMean(), LinearAddSigmoidMean(), LinearAddSigmoidMean()]
+  #mean_func = [LinearAddSigmoidMean for _ in xrange(n_lvls)]
+  mean_func = [LinearMean for _ in xrange(n_lvls)]
+  #mean_func = [ReLuMean for _ in xrange(n_lvls-1)]
+  mean_func.insert(0, ReLuMean)
+  #mean_func.insert(0, LinearMean)
   input_dim = FEATURE_DIM
   
   dbg = DeepBoostGraph(n_lvls, n_nodes, input_dim, loss_obj, mean_func)
 
   #f = lambda x : mean_func[0].mean(np.dot(np.array([1.0]), x))
-  fsig = lambda x:mean_func[0].mean(x)
-  f = lambda x: \
-    fsig(1.3*fsig(fsig(np.array([x+1]))*2.0 + fsig(np.array([x-1]))*0.5) - \
-         0.7*fsig(fsig(np.array([x+2]))*5.2 + fsig(np.array([x-3]))*3.1))
+  #fsig = lambda x:mean_func[0].mean(x)
+  #f = lambda x: \
+  #  fsig(1.3*fsig(fsig(np.array([x+1]))*2.0 + fsig(np.array([x-1]))*0.5) - \
+  #       0.7*fsig(fsig(np.array([x+2]))*5.2 + fsig(np.array([x-3]))*3.1))
   #f = lambda x : np.array([np.cos(x+1) + x*np.sin(x-1) + x])
-  
+  f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
+  #f = lambda x : np.array([8.*x + 2.8])
+
   train_set = [pt for pt in dataset(20001, f, 91612)]
   val_set = [pt for pt in dataset(201, f)]
 
@@ -224,7 +250,8 @@ def main():
   for epoch in range(max_epoch):
     for (si, pt) in enumerate(train_set):
       t+=1
-      dbg.predict_and_learn(pt.x, pt.y, 1e-0/np.power(t+5,2.0), 1.0/np.power(t+5,0.5))
+      #dbg.predict_and_learn(pt.x, pt.y, 5e-1/np.power(t,3.0), 1e-1/np.power(t,1.0))
+      dbg.predict_and_learn(pt.x, pt.y, 5e-1/np.power(epoch+1,2.0), 5e-1/np.power(epoch+1,1.0))
 
       if si%500==0:
         avg_loss = 0
@@ -233,9 +260,10 @@ def main():
           avg_loss += sq_loss.loss(p, vpt.y)
         avg_loss /= np.float64(len(val_set))
         
-        print 'Prediction on [-1, -0.5, 0, 0.5, 1]: \n {} \n {}'.format(\
-          npprint(np.array([f(-1),f(-0.5),f(0),f(0.5),f(1)]).ravel()), \
-          npprint(np.array([dbg.predict(-1), dbg.predict(-0.5), dbg.predict(0), dbg.predict(0.5), dbg.predict(1)]).ravel()))
+        print_x = [-4,-0.5,0,0.5,4]
+        print 'Prediction on {}: \n {} \n {}'.format(print_x,\
+          npprint(np.array([f(prx) for prx in print_x]).ravel()), \
+          npprint(np.array([dbg.predict(prx) for prx in print_x]).ravel()))
         print 'Avg Loss at t={} is: {}'.format(t, avg_loss)
 
 if __name__ == "__main__":
