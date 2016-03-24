@@ -41,25 +41,14 @@ class LogisticLoss(object):
   def dloss(self, p, y):
     return (-y)/(1 + np.exp(y*p))
 
-# the canonical loss of ReLU
-class ReLULoss(object):
-  def loss(self, p, y):
-    if p < 0:
-      return -p*y
-    return p*p - p*y
-  def dloss(self, p, y):
-    if p < 0:
-      return -y
-    return p - y
-
-class ReLUMean(object):
+class ReLuMean(object):
   def mean(self, x):
-    if x < 0:
-      return 0
-    return x
+      if x < 0:
+          return 0.5*x
+      return x
   def dmean(self, x): 
     if x < 0:
-      return 0
+        return 0.5
     return 1.
 
 class LinearMean(object):
@@ -117,7 +106,7 @@ class BoostNode(object):
     self.children = children
     self.children_indices = children_indices
     self.n_children = len(self.children_indices)
-    self.weights = np.zeros(self.n_children)
+    self.weights = np.zeros(self.n_children) #np.ones(self.n_children)/self.n_children
     self.b = 0.0
 
   def compute_partial_sum(self, children_pred):
@@ -215,8 +204,7 @@ class DeepBoostGraph(object):
     self.nodes = []
     for i in range(n_lvls):
       if i == 0:
-        #lvl_nodes = [RegressionNodeWithClassification('n_{}_{}'.format(i, ni), \
-        lvl_nodes = [RegressionNode('n_{}_{}'.format(i, ni), \
+        lvl_nodes = [RegressionNodeWithClassification('n_{}_{}'.format(i, ni), \
           loss_obj[i](), mean_func[i](), input_dim) for ni in range(n_nodes[i])]
       else:
         children_indices = np.reshape(np.arange(n_nodes[i-1]), (n_nodes[i], n_nodes[i-1]/n_nodes[i]))
@@ -268,11 +256,8 @@ def main():
   n_nodes = [20, 1]
   n_lvls =  len(n_nodes)
   sq_loss = SquaredLoss()
-  # with classification using logisticregression
-  #loss_obj = [LogisticLoss for _ in xrange(n_lvls-1)]
-  #mean_func = [SigmoidMean for _ in xrange(n_lvls-1)]
-  loss_obj = [ReLULoss for _ in xrange(n_lvls-1)]
-  mean_func = [ReLUMean for _ in xrange(n_lvls-1)]
+  loss_obj = [LogisticLoss for _ in xrange(n_lvls-1)]
+  mean_func = [SigmoidMean for _ in xrange(n_lvls-1)]
   loss_obj.append(SquaredLoss)
   mean_func.append(LinearMean)
 
@@ -287,10 +272,8 @@ def main():
   val_set = sorted(val_set, key = lambda x: x.x)
 
   max_epoch = 20
-  #boost_lr = 1e-3
-  #regress_lr = 5e-3
-  boost_lr = 5e-4
-  regress_lr = 1e-6
+  boost_lr = 1e-3
+  regress_lr = 5e-3
   t=0
   for epoch in range(max_epoch):
     for (si, pt) in enumerate(train_set):
