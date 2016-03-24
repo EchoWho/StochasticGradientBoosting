@@ -138,15 +138,7 @@ class BoostNode(object):
 
     self.b += yts[0][0] * step_size
     for i in range(self.n_children):
-      #sgn_tgt = yts[i] > -1e-16
-      #sgn_pred = children_pred[self.children_indices[i]] > -1e-16
-      #self.weights[i] -= (np.float64(sgn_tgt == sgn_pred) -0.5) * step_size
       self.weights[i] += yts[i+1] * children_pred[self.children_indices[i]] * step_size
-      #self.weights[i] -= yts[-1] * children_pred[self.children_indices[i]] * step_size
-      #grad = yts[-1] * children_pred[self.children_indices[i]] 
-      #grad_sign = np.sign(grad)[0]
-      #self.weights[i] -= grad_sign * step_size
-      #self.weights[i] = 2./(i+1.)
 
     return self.children_indices, yts[:-1]
 
@@ -261,7 +253,7 @@ class DeepBoostGraph(object):
 def main():
   #n_nodes = [9**i for i in reversed(range(n_lvls))]
   #n_nodes = [100, 20, 1]
-  n_nodes = [30, 1]
+  n_nodes = [20, 1]
   n_lvls =  len(n_nodes)
   sq_loss = SquaredLoss()
   loss_obj = [LogisticLoss for _ in xrange(n_lvls-1)]
@@ -273,28 +265,19 @@ def main():
   
   dbg = DeepBoostGraph(n_lvls, n_nodes, input_dim, loss_obj, mean_func)
 
-  #f = lambda x : mean_func[0].mean(np.dot(np.array([1.0]), x))
-  #fsig = lambda x:mean_func[0].mean(x)
-  #f = lambda x: \
-  #  fsig(1.3*fsig(fsig(np.array([x+1]))*2.0 + fsig(np.array([x-1]))*0.5) - \
-  #       0.7*fsig(fsig(np.array([x+2]))*5.2 + fsig(np.array([x-3]))*3.1))
-  #f = lambda x : np.array([np.cos(x+1) + x*np.sin(x-1) + x])
   f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
-  #f = lambda x : np.array([8.*x + 2.8])
 
   train_set = [pt for pt in dataset(5001, f, 91612)]
   val_set = [pt for pt in dataset(201, f)]
   val_set = sorted(val_set, key = lambda x: x.x)
 
   max_epoch = 20
-  t=0
   boost_lr = 1e-3
   regress_lr = 5e-3
+  t=0
   for epoch in range(max_epoch):
     for (si, pt) in enumerate(train_set):
       t+=1
-      #dbg.predict_and_learn(pt.x, pt.y, 5e-1/np.power(t,3.0), 1e-1/np.power(t,1.0))
-      #dbg.predict_and_learn(pt.x, pt.y, 1e-2/np.power(t_step+1,0.25), 5e-3/np.power(t_step+1,0.25))
       dbg.predict_and_learn(pt.x, pt.y, boost_lr, regress_lr)
 
       if si%1000==0:
