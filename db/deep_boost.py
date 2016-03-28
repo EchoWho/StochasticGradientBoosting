@@ -35,6 +35,7 @@ class SquaredLoss(object):
     """ p is the prediction, y is the true value"""
     return p - y
 
+# Target y are in {-1, 1}, used for sigmoidClassification
 class LogisticLoss(object):
   def loss(self, p, y):
     return np.log(1 + np.exp(-y*p))
@@ -63,6 +64,14 @@ class SigmoidMean(object):
   def dmean(self, x): 
     m = self.mean(x)
     return m*(1.0-m)
+
+class SigmoidClassifierMean(object):
+  def __init__(self):
+    self.sm = SigmoidMean()
+  def mean(self, x):
+    return 2*(self.sm.mean(x)-0.5)
+  def dmean(self, x):
+    return 2*self.sm.dmean(x)
 
 class LinearAddSigmoidMean(object):
   def __init__(self):
@@ -99,8 +108,9 @@ class GatedSignedSquareRootMean(object):
     return 0.5 / np.sqrt(absx)
 
 class BoostNode(object):
-  def __init__(self, name, loss_obj, mean_func, children=[], children_indices=[]):
+  def __init__(self, name, loss_obj, mean_func, classification=True, children=[], children_indices=[]):
     self.name = name
+    self.classification = classification
     self.loss_obj = loss_obj
     self.mean_func = mean_func
     self.children = children
@@ -124,7 +134,11 @@ class BoostNode(object):
     psum = self.compute_partial_sum(children_pred)
     yps = [ self.mean_func.mean(ps) for ps in psum ]
     # children targets for continued learning
-    yts = [ -self.loss_obj.dloss(yps[i], y) * self.mean_func.dmean(psum[i]) \
+    wgt = 1.0
+    if (self.classification):
+      wgt = np.abs(y)
+      y = np.sign(y)
+    yts = [ -self.loss_obj.dloss(yps[i], y) * self.mean_func.dmean(psum[i]) * wgt \
         for i in range(self.n_children+1) ]
 
     #print 'y   : {}'.format(npprint(y))
@@ -142,9 +156,10 @@ class BoostNode(object):
 
     return self.children_indices, yts[:-1]
 
-class RegressionNode(object):
-  def __init__(self, name, loss_obj, mean_func, input_dim):
+class LeafNode(object):
+  def __init__(self, name, loss_obj, mean_func, input_dim, classification=True):
     self.name = name
+    self.classification = classification
     self.loss_obj = loss_obj
     self.mean_func = mean_func
     self.w = np.zeros(input_dim)
@@ -159,39 +174,13 @@ class RegressionNode(object):
   def learn(self, x, y, step_size=1.0):
     pl = self.predict_linear(x)
     p = self.mean_func.mean(pl)
-    grad = step_size * self.loss_obj.dloss(p, y) * self.mean_func.dmean(pl)
+    wgt = 1.0
+    if (self.classification): 
+      wgt = np.abs(y)
+      y = np.sign(y)
+    grad = step_size * self.loss_obj.dloss(p, y) * self.mean_func.dmean(pl) * wgt
     self.w -= grad*x
     self.b -= grad
-
-# This regression predicts 1 or -1. 
-# The input target is y. The sign of y is the label.
-# The magnitude of y is the weight. 
-class RegressionNodeWithClassification(object):
-  def __init__(self, name, loss_obj, mean_func, input_dim):
-    self.name = name
-    self.loss_obj = loss_obj
-    self.mean_func = mean_func
-    self.w = np.zeros(input_dim)
-    self.b = 0
-  
-  def predict_linear(self, x):
-    return np.dot(self.w, x)+self.b
-
-  def predict_prob(self, x):
-    return self.mean_func.mean(self.predict_linear(x))
-
-  def predict(self, x):
-    return 2*(self.predict_prob(x)-0.5)
-
-  def learn(self, x, y, step_size=1.0):
-    pl = self.predict_linear(x)
-    pp = self.mean_func.mean(pl)
-    y_sgn = np.sign(y)
-    y_wgt = np.abs(y)
-    grad = step_size * self.loss_obj.dloss(pp, y_sgn) * self.mean_func.dmean(pl) * y_wgt
-    self.w -= grad*x
-    self.b -= grad
-
 
 class DeepBoostGraph(object):
   def __init__(self, n_lvls, n_nodes, input_dim, loss_obj, mean_func):
@@ -204,12 +193,12 @@ class DeepBoostGraph(object):
     self.nodes = []
     for i in range(n_lvls):
       if i == 0:
-        lvl_nodes = [RegressionNodeWithClassification('n_{}_{}'.format(i, ni), \
-          loss_obj[i](), mean_func[i](), input_dim) for ni in range(n_nodes[i])]
+        lvl_nodes = [LeafNode('n_{}_{}'.format(i, ni), \
+          loss_obj[i](), mean_func[i](), input_dim, True) for ni in range(n_nodes[i])]
       else:
         children_indices = np.reshape(np.arange(n_nodes[i-1]), (n_nodes[i], n_nodes[i-1]/n_nodes[i]))
-        lvl_nodes = [BoostNode('n_{}_{}'.format(i, ni), loss_obj[i](), mean_func[i](), self.nodes[-1], \
-          children_indices[ni].ravel()) for ni in range(n_nodes[i])]
+        lvl_nodes = [BoostNode('n_{}_{}'.format(i, ni), loss_obj[i](), mean_func[i](), i < n_lvls-1, \
+          self.nodes[-1], children_indices[ni].ravel()) for ni in range(n_nodes[i])]
       self.nodes.append(lvl_nodes)
 
   def full_pred(self, x):
@@ -241,7 +230,6 @@ class DeepBoostGraph(object):
       else:
         for (ni, node) in enumerate(self.nodes[i]):
           node.learn(x, ys[ni], regress_step_size)
-          
         
         ws = np.array([node.w for node in self.nodes[i]]).ravel()
         bs = np.array([node.b for node in self.nodes[i]]).ravel()
@@ -253,11 +241,11 @@ class DeepBoostGraph(object):
 def main():
   #n_nodes = [9**i for i in reversed(range(n_lvls))]
   #n_nodes = [100, 20, 1]
-  n_nodes = [20, 1]
+  n_nodes = [100, 25, 1]
   n_lvls =  len(n_nodes)
   sq_loss = SquaredLoss()
   loss_obj = [LogisticLoss for _ in xrange(n_lvls-1)]
-  mean_func = [SigmoidMean for _ in xrange(n_lvls-1)]
+  mean_func = [SigmoidClassifierMean for _ in xrange(n_lvls-1)]
   loss_obj.append(SquaredLoss)
   mean_func.append(LinearMean)
 
@@ -272,7 +260,7 @@ def main():
   val_set = sorted(val_set, key = lambda x: x.x)
 
   max_epoch = 20
-  boost_lr = 1e-3
+  boost_lr = 8e-4
   regress_lr = 5e-3
   t=0
   for epoch in range(max_epoch):
@@ -280,7 +268,7 @@ def main():
       t+=1
       dbg.predict_and_learn(pt.x, pt.y, boost_lr, regress_lr)
 
-      if si%1000==0:
+      if si == len(train_set)-1:
         avg_loss = 0
         for (vi, vpt) in enumerate(val_set):
           p = dbg.predict(vpt.x)
