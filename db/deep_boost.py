@@ -42,6 +42,16 @@ class LogisticLoss(object):
   def dloss(self, p, y):
     return (-y)/(1 + np.exp(y*p))
 
+# Target y is in {-1, 1}. p is in \R
+class HedgeLoss(object):
+  def loss(self, p, y):
+    return np.maximum(1.-p*y, 0)
+  def dloss(self, p, y):
+    l = self.loss(p,y)
+    if l > 0:
+      return -y
+    return 0
+
 class ReLuMean(object):
   def mean(self, x):
       if x < 0:
@@ -301,12 +311,10 @@ class DeepBoostGraph(object):
     return children_preds[-1][0]
 
 def main():
-  #n_nodes = [9**i for i in reversed(range(n_lvls))]
-  #n_nodes = [100, 20, 1]
   n_nodes = [50, 25, 1]
   n_lvls =  len(n_nodes)
   sq_loss = SquaredLoss()
-  loss_obj = [LogisticLoss for _ in xrange(n_lvls-1)]
+  loss_obj = [HedgeLoss for _ in xrange(n_lvls-1)]
   mean_func = [SigmoidClassifierMean for _ in xrange(n_lvls-1)]
   loss_obj.append(SquaredLoss)
   mean_func.append(LinearMean)
@@ -318,7 +326,7 @@ def main():
   adam_eps = 1e-5
   boost_lr = 5e-3
   regress_lr = 8e-3
-  lr_gamma = 1
+  #lr_gamma = 1
   dbg = DeepBoostGraph(n_lvls, n_nodes, input_dim, loss_obj, mean_func, adam_b1, adam_b2, adam_eps)
 
   f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
@@ -349,7 +357,7 @@ def main():
           npprint(np.array([dbg.predict(prx) for prx in print_x]).ravel()))
         print 'Avg Loss at t={} is: {}'.format(t, avg_loss)
     #boost_lr *= lr_gamma
-    regress_lr *= lr_gamma
+    #regress_lr *= lr_gamma
 
   print_info = [ (dbg.predict(pt.x), pt.y, pt.x) for pt in val_set ]
   y_preds, y_gt, x_gt = zip(*print_info)
