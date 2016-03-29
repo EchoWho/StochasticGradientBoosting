@@ -307,7 +307,6 @@ class DeepBoostGraph(object):
         bs = np.array([node.b for node in self.nodes[i]]).ravel()
 #        print 'w   : {}'.format(npprint(ws))
 #        print 'b   : {}'.format(npprint(bs))
-
     return children_preds[-1][0]
 
 def main():
@@ -335,7 +334,7 @@ def main():
   val_set = [pt for pt in dataset(201, f)]
   val_set = sorted(val_set, key = lambda x: x.x)
 
-  max_epoch = 20
+  max_epoch = 30
   t=0
   for epoch in range(max_epoch):
     np.random.shuffle(train_set)
