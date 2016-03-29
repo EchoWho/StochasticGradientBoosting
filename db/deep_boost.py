@@ -107,8 +107,47 @@ class GatedSignedSquareRootMean(object):
       return 2.
     return 0.5 / np.sqrt(absx)
 
+
+# Optimizer classes: take in a gradient $g$, and returns the value to subtract from the 
+# the parameters: i.e., x' = x - \eta * opt.update(g), where \eta is a step_size. 
+class SGDOptimizer(object):
+  def __init__(self, input_dim):
+    self.dim = input_dim   
+  
+  def update(self, grad):
+    return grad
+
+class ADAMOptimizer(object):
+  def __init__(self, input_dim, b1, b2, eps):
+    assert(b1 < 1. and b1 > 0.)
+    assert(b2 < 1. and b2 > 0.)
+    assert(eps >= 0.)
+    self.dim = input_dim
+    self.t = 1
+    self.b1 = b1
+    self.b2 = b2
+    self.eps = eps
+    self.b1_pow_t = self.b1
+    self.b2_pow_t = self.b2
+    self.m = np.zeros(input_dim)
+    self.v = np.zeros(input_dim)
+
+  def update(self, g):
+    # update momentum
+    self.m = self.b1 * self.m + (1. - self.b1) * g
+    self.v = self.b2 * self.v + (1. - self.b2) * g**2
+    # compute unbiased momenetum
+    m = self.m / (1. - self.b1_pow_t)
+    v = self.v / (1. - self.b2_pow_t)
+    # update value related to timestamp t
+    self.b1_pow_t *= self.b1
+    self.b2_pow_t *= self.b2
+    self.t += 1
+    return m / (self.eps + np.sqrt(v))
+
 class BoostNode(object):
-  def __init__(self, name, loss_obj, mean_func, classification=True, children=[], children_indices=[]):
+  def __init__(self, name, loss_obj, mean_func, classification, \
+               children, children_indices, optimizer):
     self.name = name
     self.classification = classification
     self.loss_obj = loss_obj
@@ -118,6 +157,8 @@ class BoostNode(object):
     self.n_children = len(self.children_indices)
     self.weights = np.zeros(self.n_children) #np.ones(self.n_children)/self.n_children
     self.b = 0.0
+    assert(optimizer.dim == self.n_children + 1)
+    self.optimizer = optimizer
 
   def compute_partial_sum(self, children_pred):
     psum = [self.b]
@@ -147,23 +188,30 @@ class BoostNode(object):
     #print 'yts : {}'.format(npprint(np.array(yts).ravel()))
     #print 'wgts: {}'.format(npprint(self.weights.ravel()))
 
+    # prevent explotion by failing
     assert( not np.isinf(yts[-1]))
     assert( not np.isnan(yts[-1]))
-
-    self.b += yts[0][0] * step_size
-    for i in range(self.n_children):
-      self.weights[i] += yts[i+1] * children_pred[self.children_indices[i]] * step_size
-
+    # compute gradient
+    grad = np.zeros(1+self.n_children)
+    grad[0] = -yts[0][0]
+    grad[1:] = [ -yts[i+1] * children_pred[self.children_indices[i]] \
+      for i in range(self.n_children)]
+    # update with optimized update
+    opt_update = self.optimizer.update(grad) * step_size
+    self.b -= opt_update[0]
+    self.weights -= opt_update[1:] 
     return self.children_indices, yts[:-1]
 
 class LeafNode(object):
-  def __init__(self, name, loss_obj, mean_func, input_dim, classification=True):
+  def __init__(self, name, loss_obj, mean_func, input_dim, classification, optimizer):
     self.name = name
     self.classification = classification
     self.loss_obj = loss_obj
     self.mean_func = mean_func
     self.w = np.zeros(input_dim)
     self.b = 0
+    assert(optimizer.dim == input_dim + 1)
+    self.optimizer = optimizer
   
   def predict_linear(self, x):
     return np.dot(self.w, x)+self.b
@@ -178,12 +226,19 @@ class LeafNode(object):
     if (self.classification): 
       wgt = np.abs(y)
       y = np.sign(y)
-    grad = step_size * self.loss_obj.dloss(p, y) * self.mean_func.dmean(pl) * wgt
-    self.w -= grad*x
-    self.b -= grad
+    # gradient with respect to the linear prediction wx+b
+    grad_l = self.loss_obj.dloss(p, y) * self.mean_func.dmean(pl) * wgt
+    # full gradient 
+    grad = np.zeros(1 + self.w.shape[0])
+    grad[0] = grad_l
+    grad[1:] = grad_l*x
+    # optimized update
+    opt_update = self.optimizer.update(grad) * step_size
+    self.b -= opt_update[0]
+    self.w -= opt_update[1:]
 
 class DeepBoostGraph(object):
-  def __init__(self, n_lvls, n_nodes, input_dim, loss_obj, mean_func):
+  def __init__(self, n_lvls, n_nodes, input_dim, loss_obj, mean_func, adam_b1, adam_b2, adam_eps):
     assert n_lvls == len(n_nodes)
     self.n_lvls = n_lvls
     self.n_nodes = n_nodes
@@ -194,11 +249,18 @@ class DeepBoostGraph(object):
     for i in range(n_lvls):
       if i == 0:
         lvl_nodes = [LeafNode('n_{}_{}'.format(i, ni), \
-          loss_obj[i](), mean_func[i](), input_dim, True) for ni in range(n_nodes[i])]
+          loss_obj[i](), mean_func[i](), input_dim, True, \
+          #SGDOptimizer(1+input_dim)) \
+          ADAMOptimizer(1+input_dim, adam_b1, adam_b2, adam_eps))
+          for ni in range(n_nodes[i])]
       else:
         children_indices = np.reshape(np.arange(n_nodes[i-1]), (n_nodes[i], n_nodes[i-1]/n_nodes[i]))
-        lvl_nodes = [BoostNode('n_{}_{}'.format(i, ni), loss_obj[i](), mean_func[i](), i < n_lvls-1, \
-          self.nodes[-1], children_indices[ni].ravel()) for ni in range(n_nodes[i])]
+        lvl_nodes = [BoostNode('n_{}_{}'.format(i, ni), loss_obj[i](), \
+          mean_func[i](), i < n_lvls-1, \
+          self.nodes[-1], children_indices[ni].ravel(), \
+          #SGDOptimizer(1+children_indices[ni].ravel().shape[0])) 
+          ADAMOptimizer(1+children_indices[ni].ravel().shape[0], adam_b1, adam_b2, adam_eps)) 
+          for ni in range(n_nodes[i])]
       self.nodes.append(lvl_nodes)
 
   def full_pred(self, x):
@@ -241,7 +303,7 @@ class DeepBoostGraph(object):
 def main():
   #n_nodes = [9**i for i in reversed(range(n_lvls))]
   #n_nodes = [100, 20, 1]
-  n_nodes = [100, 25, 1]
+  n_nodes = [50, 25, 1]
   n_lvls =  len(n_nodes)
   sq_loss = SquaredLoss()
   loss_obj = [LogisticLoss for _ in xrange(n_lvls-1)]
@@ -251,24 +313,30 @@ def main():
 
   input_dim = FEATURE_DIM
   
-  dbg = DeepBoostGraph(n_lvls, n_nodes, input_dim, loss_obj, mean_func)
+  adam_b1 = 0.9
+  adam_b2 = 0.9
+  adam_eps = 1e-5
+  boost_lr = 5e-3
+  regress_lr = 8e-3
+  lr_gamma = 1
+  dbg = DeepBoostGraph(n_lvls, n_nodes, input_dim, loss_obj, mean_func, adam_b1, adam_b2, adam_eps)
 
   f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
 
-  train_set = [pt for pt in dataset(5001, f, 91612)]
+  train_set = [pt for pt in dataset(5001, f, 9122)]
   val_set = [pt for pt in dataset(201, f)]
   val_set = sorted(val_set, key = lambda x: x.x)
 
   max_epoch = 20
-  boost_lr = 8e-4
-  regress_lr = 5e-3
   t=0
   for epoch in range(max_epoch):
+    np.random.shuffle(train_set)
     for (si, pt) in enumerate(train_set):
       t+=1
       dbg.predict_and_learn(pt.x, pt.y, boost_lr, regress_lr)
 
-      if si == len(train_set)-1:
+      #if si == len(train_set)-1:
+      if (si <= 4000 and si>=1000 and si%1000 == 0) or (si == len(train_set) -1):
         avg_loss = 0
         for (vi, vpt) in enumerate(val_set):
           p = dbg.predict(vpt.x)
@@ -280,8 +348,8 @@ def main():
           npprint(np.array([f(prx) for prx in print_x]).ravel()), \
           npprint(np.array([dbg.predict(prx) for prx in print_x]).ravel()))
         print 'Avg Loss at t={} is: {}'.format(t, avg_loss)
-    #boost_lr *= 0.85
-    #regress_lr *= 0.85
+    #boost_lr *= lr_gamma
+    regress_lr *= lr_gamma
 
   print_info = [ (dbg.predict(pt.x), pt.y, pt.x) for pt in val_set ]
   y_preds, y_gt, x_gt = zip(*print_info)
