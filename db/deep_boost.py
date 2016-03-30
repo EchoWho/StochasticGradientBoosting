@@ -309,8 +309,40 @@ class DeepBoostGraph(object):
 #        print 'b   : {}'.format(npprint(bs))
     return children_preds[-1][0]
 
+def plot_per_iter_results(validation_pts, validation_preds):
+    import time,os
+    num_iters = len(validation_preds)
+
+    val_x = np.array([pt.x[0] for pt in validation_pts])
+    val_y = np.array([pt.y for pt in validation_pts])
+
+    pred_base_outdir = os.path.join(os.path.split(__file__)[0], '../predict_func') 
+    if not os.path.isdir(pred_base_outdir):
+        os.mkdir(pred_base_outdir)
+
+    y_lims = [min(np.min(val_y), np.min(validation_preds)), max(np.max(val_y), np.max(validation_preds))]
+    x_lims = [np.min(val_x), np.max(val_x)]
+    axis_lims = list(x_lims); axis_lims.extend(y_lims)   
+    axis_lims[0] = axis_lims[0]-0.05*abs(axis_lims[0]); axis_lims[2] = axis_lims[2]-0.05*abs(axis_lims[2]);
+    axis_lims[1] = axis_lims[1]+0.05*abs(axis_lims[1]); axis_lims[3] = axis_lims[3]+0.05*abs(axis_lims[3]);
+
+    for i in xrange(num_iters):
+        print('Drawing frame {}/{}'.format(i+1, num_iters))
+        plt.figure(1)
+        plt.clf()
+        plt.plot(val_x, val_y, label='Ground Truth', linewidth=3)
+        plt.plot(val_x, np.array(validation_preds[i]), linewidth=1.5, label='Online Boosting')
+        plt.xlabel('X', fontsize=12); plt.ylabel('Y', fontsize=12)
+        plt.title('Data Pt. {}/{}'.format(i, num_iters), fontsize=12)
+        plt.legend(loc=2,fontsize=12)
+        plt.axis(axis_lims)
+        out_fname = os.path.join(pred_base_outdir, 'frame{:03d}.png'.format(i))
+        plt.savefig(out_fname, format='png')
+    #endfor
+    print('Saved out: {}'.format(out_fname))
+
 def main():
-  n_nodes = [50, 25, 1]
+  n_nodes = [50, 1]
   n_lvls =  len(n_nodes)
   sq_loss = SquaredLoss()
   loss_obj = [HedgeLoss for _ in xrange(n_lvls-1)]
@@ -334,8 +366,10 @@ def main():
   val_set = [pt for pt in dataset(201, f)]
   val_set = sorted(val_set, key = lambda x: x.x)
 
-  max_epoch = 30
+  max_epoch = 25
   t=0
+  validation_preds = []
+  validation_losses = []
   for epoch in range(max_epoch):
     np.random.shuffle(train_set)
     for (si, pt) in enumerate(train_set):
@@ -344,19 +378,21 @@ def main():
 
       #if si == len(train_set)-1:
       if (si <= 4000 and si>=1000 and si%1000 == 0) or (si == len(train_set) -1):
-        avg_loss = 0
-        for (vi, vpt) in enumerate(val_set):
-          p = dbg.predict(vpt.x)
-          avg_loss += sq_loss.loss(p, vpt.y)
-        avg_loss /= np.float64(len(val_set))
+        preds = [ dbg.predict(vpt.x) for vpt in val_set ]
+        losses = [ sq_loss.loss(preds[vi], val_set[vi].y) for vi in range(len(val_set)) ]
+        avg_loss = np.mean(losses)
         
         print_x = [-4,-3,-2,-1,0,1,2,3,4]
         print 'Prediction on {}: \n {} \n {}'.format(print_x,\
           npprint(np.array([f(prx) for prx in print_x]).ravel()), \
           npprint(np.array([dbg.predict(prx) for prx in print_x]).ravel()))
         print 'Avg Loss at t={} is: {}'.format(t, avg_loss)
+        validation_preds.append(preds)
+        validation_losses.append(avg_loss)
     #boost_lr *= lr_gamma
     #regress_lr *= lr_gamma
+
+  plot_per_iter_results(val_set, validation_preds)
 
   print_info = [ (dbg.predict(pt.x), pt.y, pt.x) for pt in val_set ]
   y_preds, y_gt, x_gt = zip(*print_info)
