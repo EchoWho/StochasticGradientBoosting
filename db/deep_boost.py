@@ -327,7 +327,7 @@ def plot_per_iter_results(validation_pts, validation_preds):
     axis_lims[1] = axis_lims[1]+0.05*abs(axis_lims[1]); axis_lims[3] = axis_lims[3]+0.05*abs(axis_lims[3]);
 
     for i in xrange(num_iters):
-        print('Drawing frame {}/{}'.format(i+1, num_iters))
+        #print('Drawing frame {}/{}'.format(i+1, num_iters))
         plt.figure(1)
         plt.clf()
         plt.plot(val_x, val_y, label='Ground Truth', linewidth=3)
@@ -353,11 +353,12 @@ def main():
   input_dim = FEATURE_DIM
   
   adam_b1 = 0.9
-  adam_b2 = 0.9
-  adam_eps = 1e-5
-  boost_lr = 5e-3
+  adam_b2 = 0.99
+  adam_eps = 1e-8
+  boost_lr = 5e-4
   regress_lr = 8e-3
-  #lr_gamma = 1
+  boost_lr_gamma = 0.1
+  regress_lr_gamma = 0.25
   dbg = DeepBoostGraph(n_lvls, n_nodes, input_dim, loss_obj, mean_func, adam_b1, adam_b2, adam_eps)
 
   f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
@@ -365,8 +366,10 @@ def main():
   train_set = [pt for pt in dataset(5001, f, 9122)]
   val_set = [pt for pt in dataset(201, f)]
   val_set = sorted(val_set, key = lambda x: x.x)
+  val_set_x = [ pt.x for pt in val_set ]
+  val_set_y = [ pt.y for pt in val_set ] 
 
-  max_epoch = 25
+  max_epoch = 30
   t=0
   validation_preds = []
   validation_losses = []
@@ -377,7 +380,7 @@ def main():
       dbg.predict_and_learn(pt.x, pt.y, boost_lr, regress_lr)
 
       #if si == len(train_set)-1:
-      if (si <= 4000 and si>=1000 and si%1000 == 0) or (si == len(train_set) -1):
+      if (si <= 4000 and si>=1000 and si%2500 == 0) or (si == len(train_set) -1):
         preds = [ dbg.predict(vpt.x) for vpt in val_set ]
         losses = [ sq_loss.loss(preds[vi], val_set[vi].y) for vi in range(len(val_set)) ]
         avg_loss = np.mean(losses)
@@ -389,16 +392,22 @@ def main():
         print 'Avg Loss at t={} is: {}'.format(t, avg_loss)
         validation_preds.append(preds)
         validation_losses.append(avg_loss)
-    #boost_lr *= lr_gamma
-    #regress_lr *= lr_gamma
+        plt.figure(1)
+        plt.clf()
+
+        plt.plot(val_set_x, val_set_y, label='Ground Truth')
+        plt.plot(val_set_x, preds, label='Predictions')
+        plt.legend(loc=4)
+        plt.show(block=False)
+        plt.draw()
+    #endfor
+    if epoch==6:
+      boost_lr *= boost_lr_gamma
+      regress_lr *= regress_lr_gamma
+  #endfor
 
   plot_per_iter_results(val_set, validation_preds)
 
-  print_info = [ (dbg.predict(pt.x), pt.y, pt.x) for pt in val_set ]
-  y_preds, y_gt, x_gt = zip(*print_info)
-  plt.plot(x_gt, y_preds, label='Predictions')
-  plt.plot(x_gt, y_gt, label='Ground Truth')
-  plt.legend(loc=4)
   plt.show(block=False)
   embed()
 
