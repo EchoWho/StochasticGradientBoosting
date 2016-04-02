@@ -29,7 +29,7 @@ def sigmoid_clf_mean(x):
   return tf.add(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.neg(tf.ones_like(x)))
 
 def logistic_loss_eltws(yp, y):
-  return tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, p))), tf.ones_like(y)))
+  return tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, y))), tf.ones_like(y)))
 
 def square_loss_eltws(yp, y):
   return tf.scalar_mul(0.5, tf.square(tf.sub(yp, y)))
@@ -86,7 +86,7 @@ class TFLeafNode(object):
 
   def training(self, lr):
     self.optimizer = self.opt_type(lr)
-    self.train_op = optimizer.minimize(self.loss)
+    self.train_op = self.optimizer.minimize(self.loss)
     return self.train_op
 
 class TFBoostNode(object):
@@ -106,7 +106,7 @@ class TFBoostNode(object):
   def inference(self, children_preds):
     self.n_children = len(children_preds)
     with tf.name_scope(self.name):
-      self.ps_b = tf.Variable(tf.zeros([1, self.dim[0]]), name='ps_bias')
+      self.ps_b = tf.Variable(tf.zeros([1,self.dim[0]]), name='ps_bias')
       self.ps_ws = [tf.Variable(tf.zeros([1]), name='ps_weight_'+str(ci)) 
           for ci in range(self.n_children)]
       self.tf_w = tf.Variable(
@@ -119,11 +119,12 @@ class TFBoostNode(object):
       self.y_hats = []
       for i in range(self.n_children+1):
         if i == 0:
-          ps = tf.tile(self.ps_b)
+          ps = self.ps_b
         else:
-          ps = tf.add(ps, tf.mul(self.ps_ws[ci], cp))
+          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws[ci]))
         self.psums.append(ps)
-        self.y_hats.append(self.mean_type(tf.matmul(self.tf_w, ps)))
+        self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
+    return self.y_hats[-1]
 
   def loss(self, y):
     with tf.name_scope(self.name):
@@ -133,7 +134,7 @@ class TFBoostNode(object):
         self.losses = [ tf.reduce_mean(tf.mul(y_abs, tf.self.loss_type(y_hat, y_sgn)))
             for y_hat in self.y_hats ]
       else:
-        self.losses = [ tf.reduce_mean(tf.self.loss_type(y_hat, y)) for y_hat in self.y_hats ]
+        self.losses = [ tf.reduce_mean(self.loss_type(y_hat, y)) for y_hat in self.y_hats ]
     return self.losses
       
   def training(self, lr):
@@ -187,17 +188,18 @@ class TFDeepBoostGraph(object):
     self.pred = l_preds[0] # dbg.inference()
 
     # construct loss and training_op from top down
-    tgts = (self.y_placeholder) # prediction target of nodes on a level (back to front)
+    tgts = [self.y_placeholder] # prediction target of nodes on a level (back to front)
     ll_train_ops = []
     for i in reversed(range(len(n_nodes))):
-      l_nodes = ll_nodes[i]
+      l_nodes = self.ll_nodes[i]
       map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
       if i > 0:
         trainop_tgts = map(lambda nd : nd.training(lr_boost), l_nodes)
         l_train_ops, tgts = zip(*trainop_tgts)
         l_train_ops = list(itertools.chain.from_iterable(l_train_ops)) #flatten the list
+        tgts = list(itertools.chain.from_iterable(tgts))
       else:
-        l_train_ops = map(lambda x : x.training(lr_leaf), ll_nodes[i]) #every leaf node has one op.
+        l_train_ops = map(lambda x : x.training(lr_leaf), l_nodes) #every leaf node has one op.
         
       ll_train_ops.append(l_train_ops)
     #endfor
@@ -251,11 +253,12 @@ def main(_):
   sess.run(init)
   
   t = 0
+  batch_size = 500
   val_interval = 1000
   max_epoch = 30
   for epoch in range(max_epoch):
     for si in range(0, len(train_set), batch_size):
-      si_end = min(si+batch, len(train_set))
+      si_end = min(si+batch_size, len(train_set))
       x = [ pt.x for pt in train_set[si:si_end] ]
       y = [ pt.y for pt in train_set[si:si_end] ]
       sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y))
