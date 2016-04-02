@@ -26,7 +26,7 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 def sigmoid_clf_mean(x):
-  return tf.add(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.neg(tf.ones_like(x)))
+  return tf.sub(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.ones_like(x))
 
 def logistic_loss_eltws(yp, y):
   return tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, y))), tf.ones_like(y)))
@@ -148,8 +148,7 @@ class TFBoostNode(object):
           train_op = opt.minimize(self.losses[i], var_list=[self.tf_w, self.ps_b])
         else:
           train_op = opt.minimize(self.losses[i], var_list=[self.tf_w, self.ps_ws[i-1]])
-          # TODO negation
-          grad_ps = tf.gradients(self.losses[i], [self.psums[i-1]])[0]
+          grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
           self.children_tgts.append(grad_ps)
         self.train_ops.append(train_op)
       #endfor 
@@ -192,7 +191,7 @@ class TFDeepBoostGraph(object):
     ll_train_ops = []
     for i in reversed(range(len(n_nodes))):
       l_nodes = self.ll_nodes[i]
-      map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
+      _ =  map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
       if i > 0:
         trainop_tgts = map(lambda nd : nd.training(lr_boost), l_nodes)
         l_train_ops, tgts = zip(*trainop_tgts)
@@ -232,8 +231,8 @@ def main(_):
   output_dim = 1
   dims = [ input_dim, 1, output_dim ] 
 
-  lr_boost = 8e-4
-  lr_leaf = 8e-3
+  lr_boost = 0.001
+  lr_leaf = 0.001
 
   # modify the default tensorflow graph.
   dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types, lr_boost, lr_leaf)
@@ -255,7 +254,7 @@ def main(_):
   t = 0
   batch_size = 500
   val_interval = 1000
-  max_epoch = 30
+  max_epoch = 15
   for epoch in range(max_epoch):
     for si in range(0, len(train_set), batch_size):
       si_end = min(si+batch_size, len(train_set))
@@ -266,10 +265,17 @@ def main(_):
       t += si_end-si
       if t > val_interval:
         t = t % val_interval
-        _, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
-                               feed_dict=dbg.fill_feed_dict(x_val, y_val))
+        preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
+                                   feed_dict=dbg.fill_feed_dict(x_val, y_val))
+        assert(not np.isnan(avg_loss))
         print 'avg_loss : {}'.format(avg_loss)
 
+  
+  plt.plot(x_val, preds, label='Prediction')
+  plt.plot(x_val, y_val, label='Ground Truth')
+  plt.legend(loc=4)
+  plt.show(block=False)
+  embed()
 
 if __name__ == '__main__':
   main(0)
