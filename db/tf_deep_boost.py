@@ -131,7 +131,7 @@ class TFBoostNode(object):
       if self.convert_y:
         y_sgn = tf.sign(y, name='y_sgn')
         y_abs = tf.abs(y, name='y_abs')
-        self.losses = [ tf.reduce_mean(tf.mul(y_abs, tf.self.loss_type(y_hat, y_sgn)))
+        self.losses = [ tf.reduce_mean(tf.mul(y_abs, self.loss_type(y_hat, y_sgn)))
             for y_hat in self.y_hats ]
       else:
         self.losses = [ tf.reduce_mean(self.loss_type(y_hat, y)) for y_hat in self.y_hats ]
@@ -166,6 +166,7 @@ class TFDeepBoostGraph(object):
     self.lr_leaf = lr_leaf
 
     # construct inference from bottom up
+    print 'Construct inference()'
     self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]))
     self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]))
     self.ll_nodes = []
@@ -186,10 +187,12 @@ class TFDeepBoostGraph(object):
     #endfor
     self.pred = l_preds[0] # dbg.inference()
 
+    print 'Construct loss() and training()'
     # construct loss and training_op from top down
     tgts = [self.y_placeholder] # prediction target of nodes on a level (back to front)
     ll_train_ops = []
     for i in reversed(range(len(n_nodes))):
+      print 'depth={}'.format(i)
       l_nodes = self.ll_nodes[i]
       _ =  map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
       if i > 0:
@@ -202,6 +205,8 @@ class TFDeepBoostGraph(object):
         
       ll_train_ops.append(l_train_ops)
     #endfor
+
+    print 'done.'
     #flatten all train_ops in one list
     self.train_ops = list(itertools.chain.from_iterable(ll_train_ops)) # dbg.training()
   #end __init__
@@ -219,7 +224,7 @@ class TFDeepBoostGraph(object):
     return self.ll_nodes[-1][0].losses[-1]
 
 def main(_):
-  n_nodes = [20, 1]
+  n_nodes = [40, 20, 1]
   n_lvls = len(n_nodes)
   mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
   mean_types.append(lambda x : x)
@@ -229,10 +234,10 @@ def main(_):
 
   input_dim = 1
   output_dim = 1
-  dims = [ input_dim, 1, output_dim ] 
+  dims = [ input_dim, 1, 1, output_dim ] 
 
-  lr_boost = 0.001
-  lr_leaf = 0.001
+  lr_boost = 5e-4
+  lr_leaf = 5e-4
 
   # modify the default tensorflow graph.
   dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types, lr_boost, lr_leaf)
@@ -240,7 +245,7 @@ def main(_):
  
   f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
 
-  train_set = [pt for pt in dataset(5001, f, 9122)]
+  train_set = [pt for pt in dataset(5000, f, 9122)]
   val_set = [pt for pt in dataset(201, f)]
   val_set = sorted(val_set, key = lambda x: x.x)
 
@@ -249,26 +254,30 @@ def main(_):
 
   init = tf.initialize_all_variables()
   sess = tf.Session()
+  print 'Initializing...'
   sess.run(init)
+  print 'Initialization done'
   
   t = 0
-  batch_size = 500
+  batch_size = 5
   val_interval = 1000
   max_epoch = 15
   for epoch in range(max_epoch):
+    np.random.shuffle(train_set)
     for si in range(0, len(train_set), batch_size):
       si_end = min(si+batch_size, len(train_set))
       x = [ pt.x for pt in train_set[si:si_end] ]
       y = [ pt.y for pt in train_set[si:si_end] ]
+      #print 'train epoch={}, start={}'.format(epoch, si)
       sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y))
+
       
-      t += si_end-si
-      if t > val_interval:
-        t = t % val_interval
+      if t % val_interval == 0:
         preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
                                    feed_dict=dbg.fill_feed_dict(x_val, y_val))
         assert(not np.isnan(avg_loss))
-        print 'avg_loss : {}'.format(avg_loss)
+        print 't={} avg_loss : {}'.format(t, avg_loss)
+      t += si_end-si
 
   
   plt.plot(x_val, preds, label='Prediction')
