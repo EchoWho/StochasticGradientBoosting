@@ -9,6 +9,8 @@ from collections import namedtuple
 from IPython import embed
 
 import tensorflow as tf
+from tensorflow.examples.tutorials.mnist import input_data
+mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
 
 DataPt = namedtuple('DataPt', ['x','y'])
 MAX_X=5
@@ -225,7 +227,7 @@ class TFDeepBoostGraph(object):
 
 def main(_):
   #n_nodes = [40, 20, 1]
-  n_nodes = [20, 1]
+  n_nodes = [50, 1]
   n_lvls = len(n_nodes)
   mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
   mean_types.append(lambda x : x)
@@ -245,13 +247,13 @@ def main(_):
   lr_leaf_sgd = 5e-4
 
   # tuned for batch_size = 200
-  lr_boost_adam = 5e-3
-  lr_leaf_adam = 8e-3
+  lr_boost_adam = 2e-3 #5e-3
+  lr_leaf_adam = 2e-3 #8e-3
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
-  gamma_boost = 0.8
-  gamma_leaf = 0.8
+  gamma_boost = 0.7
+  gamma_leaf = 0.7
 
   # modify the default tensorflow graph.
   dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types)
@@ -273,15 +275,17 @@ def main(_):
   print 'Initialization done'
   
   t = 0
+  epoch = -1
   max_epoch = 50
+  max_epoch_ult = max_epoch * 2
   batch_size = 200
   val_interval = 1000
   best_avg_loss = np.Inf 
-  last_avg_loss = np.Inf
   worsen_cnt = 0
-  restore_threshold = 2
+  restore_threshold = len(train_set) / val_interval
   model_path = '../model/best_model.ckpt'
-  for epoch in range(max_epoch):
+  while epoch < max_epoch and epoch < max_epoch_ult:
+    epoch += 1
     print("-----Epoch {:d}-----".format(epoch))
     np.random.shuffle(train_set)
     for si in range(0, len(train_set), batch_size):
@@ -308,29 +312,25 @@ def main(_):
         plt.show(block=False)
         print 'epoch={},t={} avg_loss : {}'.format(epoch, t, avg_loss)
 
-        if epoch < 4:
-          continue
+        #if epoch < 4:
+        continue
         
-        # saves if improves over the best
-        if best_avg_loss > avg_loss:
-          saver.save(sess, model_path)
-          best_avg_loss = avg_loss
-
-        # restores if consecutive worsens, and lower the lr. 
-        if avg_loss > last_avg_loss:
+        # restores if is worse than the best multiple times
+        if avg_loss > best_avg_loss:
           worsen_cnt += 1
           if worsen_cnt > restore_threshold:
-            print "restoring to previous best"
+            print 'Restore to previous best loss: {}'.format(best_avg_loss)
             saver.restore(sess, model_path)
             worsen_cnt = 0
-            last_avg_loss = best_avg_loss
+            max_epoch += 1
             lr_boost *= gamma_boost
             lr_leaf *= gamma_leaf
-          else:
-            last_avg_loss = avg_loss
         else:
           worsen_cnt = 0
-          last_avg_loss = avg_loss
+          lr_boost = lr_boost_adam
+          lr_leaf = lr_leaf_adam
+          saver.save(sess, model_path)
+          best_avg_loss = avg_loss
     #endfor
   #endfor
   embed()
