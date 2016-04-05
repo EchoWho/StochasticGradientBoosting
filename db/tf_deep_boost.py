@@ -155,15 +155,15 @@ class TFBoostNode(object):
     return self.train_ops, self.children_tgts
 
 class TFDeepBoostGraph(object):
-  def __init__(self, dims, n_nodes, mean_types, loss_types, opt_types, lr_boost, lr_leaf):
+  def __init__(self, dims, n_nodes, mean_types, loss_types, opt_types):
     # dims: [input_d, out_d0, out_d1, ..., out_D==output_d]
     self.dims = dims
     self.n_nodes = n_nodes
     self.mean_types = mean_types
     self.loss_types = loss_types
     self.opt_types = opt_types
-    self.lr_boost = lr_boost
-    self.lr_leaf = lr_leaf
+    self.lr_boost = tf.placeholder(tf.float32, shape=[]) # placeholder for future changes
+    self.lr_leaf = tf.placeholder(tf.float32, shape=[]) 
 
     # construct inference from bottom up
     print 'Construct inference()'
@@ -196,23 +196,23 @@ class TFDeepBoostGraph(object):
       l_nodes = self.ll_nodes[i]
       _ =  map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
       if i > 0:
-        trainop_tgts = map(lambda nd : nd.training(lr_boost), l_nodes)
+        trainop_tgts = map(lambda nd : nd.training(self.lr_boost), l_nodes)
         l_train_ops, tgts = zip(*trainop_tgts)
         l_train_ops = list(itertools.chain.from_iterable(l_train_ops)) #flatten the list
         tgts = list(itertools.chain.from_iterable(tgts))
       else:
-        l_train_ops = map(lambda x : x.training(lr_leaf), l_nodes) #every leaf node has one op.
+        l_train_ops = map(lambda x : x.training(self.lr_leaf), l_nodes) #every leaf node has one op.
         
       ll_train_ops.append(l_train_ops)
     #endfor
-
-    print 'done.'
     #flatten all train_ops in one list
     self.train_ops = list(itertools.chain.from_iterable(ll_train_ops)) # dbg.training()
+    print 'done.'
   #end __init__
 
-  def fill_feed_dict(self, x, y):
-    return { self.x_placeholder: x, self.y_placeholder: y }
+  def fill_feed_dict(self, x, y, lr_boost, lr_leaf):
+    return { self.x_placeholder : x, self.y_placeholder : y,
+             self.lr_boost : lr_boost, self.lr_leaf : lr_leaf}
 
   def inference(self):
     return self.pred
@@ -250,10 +250,12 @@ def main(_):
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
+  gamma_boost = 0.8
+  gamma_leaf = 0.8
 
   # modify the default tensorflow graph.
-  dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types, lr_boost, lr_leaf)
-
+  dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types)
+  saver = tf.train.Saver()
  
   f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
 
@@ -271,24 +273,32 @@ def main(_):
   print 'Initialization done'
   
   t = 0
+  max_epoch = 50
   batch_size = 200
   val_interval = 1000
-  max_epoch = 50
+  best_avg_loss = np.Inf 
+  last_avg_loss = np.Inf
+  worsen_cnt = 0
+  restore_threshold = 2
+  model_path = '../model/best_model.ckpt'
   for epoch in range(max_epoch):
     print("-----Epoch {:d}-----".format(epoch))
     np.random.shuffle(train_set)
     for si in range(0, len(train_set), batch_size):
+      #print 'train epoch={}, start={}'.format(epoch, si)
       si_end = min(si+batch_size, len(train_set))
       x = [ pt.x for pt in train_set[si:si_end] ]
       y = [ pt.y for pt in train_set[si:si_end] ]
-      #print 'train epoch={}, start={}'.format(epoch, si)
-      sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y))
-
+      sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf))
       
+      # Evaluate
+      t += si_end-si
       if t % val_interval == 0:
         preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
-                                   feed_dict=dbg.fill_feed_dict(x_val, y_val))
+                                   feed_dict=dbg.fill_feed_dict(x_val, y_val, 
+                                                                lr_boost, lr_leaf))
         assert(not np.isnan(avg_loss))
+        # Plotting the fit.
         plt.figure(1)
         plt.clf()
         plt.plot(x_val, preds, label='Prediction')
@@ -297,9 +307,32 @@ def main(_):
         plt.draw()
         plt.show(block=False)
         print 'epoch={},t={} avg_loss : {}'.format(epoch, t, avg_loss)
-      t += si_end-si
 
-  
+        if epoch < 4:
+          continue
+        
+        # saves if improves over the best
+        if best_avg_loss > avg_loss:
+          saver.save(sess, model_path)
+          best_avg_loss = avg_loss
+
+        # restores if consecutive worsens, and lower the lr. 
+        if avg_loss > last_avg_loss:
+          worsen_cnt += 1
+          if worsen_cnt > restore_threshold:
+            print "restoring to previous best"
+            saver.restore(sess, model_path)
+            worsen_cnt = 0
+            last_avg_loss = best_avg_loss
+            lr_boost *= gamma_boost
+            lr_leaf *= gamma_leaf
+          else:
+            last_avg_loss = avg_loss
+        else:
+          worsen_cnt = 0
+          last_avg_loss = avg_loss
+    #endfor
+  #endfor
   embed()
 
 if __name__ == '__main__':
