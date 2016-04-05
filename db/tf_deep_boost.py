@@ -224,20 +224,32 @@ class TFDeepBoostGraph(object):
     return self.ll_nodes[-1][0].losses[-1]
 
 def main(_):
-  n_nodes = [40, 20, 1]
+  #n_nodes = [40, 20, 1]
+  n_nodes = [20, 1]
   n_lvls = len(n_nodes)
   mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
   mean_types.append(lambda x : x)
   loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
   loss_types.append(square_loss_eltws)
-  opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
+  #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
+  opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
 
   input_dim = 1
   output_dim = 1
-  dims = [ input_dim, 1, 1, output_dim ] 
 
-  lr_boost = 5e-4
-  lr_leaf = 5e-4
+  dims = [1 for _ in xrange(n_lvls+1)] 
+  dims[0] = input_dim
+  dims[-1] = output_dim 
+
+  lr_boost_sgd = 5e-4
+  lr_leaf_sgd = 5e-4
+
+  # tuned for batch_size = 200
+  lr_boost_adam = 5e-3
+  lr_leaf_adam = 8e-3
+
+  lr_boost = lr_boost_adam
+  lr_leaf  = lr_leaf_adam
 
   # modify the default tensorflow graph.
   dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types, lr_boost, lr_leaf)
@@ -259,10 +271,11 @@ def main(_):
   print 'Initialization done'
   
   t = 0
-  batch_size = 5
+  batch_size = 200
   val_interval = 1000
-  max_epoch = 15
+  max_epoch = 50
   for epoch in range(max_epoch):
+    print("-----Epoch {:d}-----".format(epoch))
     np.random.shuffle(train_set)
     for si in range(0, len(train_set), batch_size):
       si_end = min(si+batch_size, len(train_set))
@@ -276,14 +289,17 @@ def main(_):
         preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
                                    feed_dict=dbg.fill_feed_dict(x_val, y_val))
         assert(not np.isnan(avg_loss))
-        print 't={} avg_loss : {}'.format(t, avg_loss)
+        plt.figure(1)
+        plt.clf()
+        plt.plot(x_val, preds, label='Prediction')
+        plt.plot(x_val, y_val, label='Ground Truth')
+        plt.legend(loc=4)
+        plt.draw()
+        plt.show(block=False)
+        print 'epoch={},t={} avg_loss : {}'.format(epoch, t, avg_loss)
       t += si_end-si
 
   
-  plt.plot(x_val, preds, label='Prediction')
-  plt.plot(x_val, y_val, label='Ground Truth')
-  plt.legend(loc=4)
-  plt.show(block=False)
   embed()
 
 if __name__ == '__main__':
