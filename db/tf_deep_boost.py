@@ -266,11 +266,11 @@ def main(_):
     train_set = list(range(mnist.train.num_examples))
     x_tra = mnist.train.images
     y_tra = mnist.train.labels
-    x_val = mnist.validation.images
-    y_val = mnist.validation.labels
+    x_val = mnist.test.images # validation
+    y_val = mnist.test.labels
     model_name_suffix = 'mnist'
 
-    n_nodes = [20, 1]
+    n_nodes = [40, 8, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -315,7 +315,7 @@ def main(_):
   max_epoch = 50
   max_epoch_ult = max_epoch * 2
   batch_size = 200
-  val_interval = 5000
+  val_interval = 2500
   best_avg_loss = np.Inf 
   worsen_cnt = 0
   restore_threshold = len(train_set) / val_interval
