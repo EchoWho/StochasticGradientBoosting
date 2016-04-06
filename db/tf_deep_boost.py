@@ -9,8 +9,6 @@ from collections import namedtuple
 from IPython import embed
 
 import tensorflow as tf
-from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
 
 DataPt = namedtuple('DataPt', ['x','y'])
 MAX_X=5
@@ -35,6 +33,9 @@ def logistic_loss_eltws(yp, y):
 
 def square_loss_eltws(yp, y):
   return tf.scalar_mul(0.5, tf.square(tf.sub(yp, y)))
+
+def multi_clf_err(yp, y):
+  return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
 
 class TFLeafNode(object):
   """ Apply a K-dim generalized linear model 
@@ -105,7 +106,7 @@ class TFBoostNode(object):
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
     self.convert_y = convert_y
 
-  def inference(self, children_preds):
+  def inference(self, children_preds, batch_size):
     self.n_children = len(children_preds)
     with tf.name_scope(self.name):
       self.ps_b = tf.Variable(tf.zeros([1,self.dim[0]]), name='ps_bias')
@@ -121,7 +122,7 @@ class TFBoostNode(object):
       self.y_hats = []
       for i in range(self.n_children+1):
         if i == 0:
-          ps = self.ps_b
+          ps = tf.tile(self.ps_b, tf.pack([batch_size, 1]))
         else:
           ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws[ci]))
         self.psums.append(ps)
@@ -157,13 +158,15 @@ class TFBoostNode(object):
     return self.train_ops, self.children_tgts
 
 class TFDeepBoostGraph(object):
-  def __init__(self, dims, n_nodes, mean_types, loss_types, opt_types):
+  def __init__(self, dims, n_nodes, mean_types, loss_types, opt_types, eval_type=None):
     # dims: [input_d, out_d0, out_d1, ..., out_D==output_d]
     self.dims = dims
     self.n_nodes = n_nodes
     self.mean_types = mean_types
     self.loss_types = loss_types
     self.opt_types = opt_types
+    self.eval_type = eval_type
+    self.batch_size = tf.placeholder(tf.int32, shape=[])
     self.lr_boost = tf.placeholder(tf.float32, shape=[]) # placeholder for future changes
     self.lr_leaf = tf.placeholder(tf.float32, shape=[]) 
 
@@ -184,7 +187,8 @@ class TFDeepBoostGraph(object):
 
         assert(n_nodes[i-1] % n_nodes[i] == 0)
         nc = n_nodes[i-1] / n_nodes[i] #n_children
-        l_preds = map(lambda i : l_nodes[i].inference(l_preds[i*nc:(i+1)*nc]), range(n_nodes[i]))
+        l_preds = map(lambda i : l_nodes[i].inference(l_preds[i*nc:(i+1)*nc], self.batch_size), 
+            range(n_nodes[i]))
       self.ll_nodes.append(l_nodes)
     #endfor
     self.pred = l_preds[0] # dbg.inference()
@@ -213,7 +217,12 @@ class TFDeepBoostGraph(object):
   #end __init__
 
   def fill_feed_dict(self, x, y, lr_boost, lr_leaf):
+    if isinstance(x, list):
+      b_size = len(x)
+    else:
+      b_size = x.shape[0]
     return { self.x_placeholder : x, self.y_placeholder : y,
+             self.batch_size : b_size, 
              self.lr_boost : lr_boost, self.lr_leaf : lr_leaf}
 
   def inference(self):
@@ -223,32 +232,67 @@ class TFDeepBoostGraph(object):
     return self.train_ops
 
   def evaluation(self):
-    return self.ll_nodes[-1][0].losses[-1]
+    if self.eval_type == None:
+      return self.ll_nodes[-1][0].losses[-1]
+    return self.eval_type(self.pred, self.y_placeholder)
 
 def main(_):
-  #n_nodes = [40, 20, 1]
-  n_nodes = [50, 1]
-  n_lvls = len(n_nodes)
-  mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
-  mean_types.append(lambda x : x)
-  loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
-  loss_types.append(square_loss_eltws)
-  #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
-  opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+  # ------------- Dataset -------------
+  arun_1d_regress = False
+  if arun_1d_regress:
+    f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
+    train_set = [pt for pt in dataset(5000, f, 9122)]
+    val_set = [pt for pt in dataset(201, f)]
+    val_set = sorted(val_set, key = lambda x: x.x)
+    x_val = [ pt.x for pt in val_set]
+    y_val = [ pt.y for pt in val_set]
+    model_name_suffix = '1d_reg'
 
-  input_dim = 1
-  output_dim = 1
+    #n_nodes = [40, 20, 1]
+    n_nodes = [20, 1]
+    n_lvls = len(n_nodes)
+    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
+    mean_types.append(lambda x : x)
+    loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
+    loss_types.append(square_loss_eltws)
+    #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
+    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    eval_type = None
 
-  dims = [1 for _ in xrange(n_lvls+1)] 
+  else:
+    from tensorflow.examples.tutorials.mnist import input_data
+    mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
+
+    train_set = list(range(mnist.train.num_examples))
+    x_tra = mnist.train.images
+    y_tra = mnist.train.labels
+    x_val = mnist.validation.images
+    y_val = mnist.validation.labels
+    model_name_suffix = 'mnist'
+
+    n_nodes = [20, 1]
+    n_lvls = len(n_nodes)
+    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
+    mean_types.append(lambda x : x)
+    loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
+    loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
+    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    eval_type = multi_clf_err
+
+  input_dim = len(x_val[0].ravel())
+  output_dim = len(y_val[0].ravel())
+
+  dims = [output_dim for _ in xrange(n_lvls+1)] 
   dims[0] = input_dim
   dims[-1] = output_dim 
 
-  lr_boost_sgd = 5e-4
-  lr_leaf_sgd = 5e-4
+  # tuned for batch_size = 200, arun 1-d regress
+  #lr_boost_adam = 2e-3 [50,1] #5e-3 [20,1]
+  #lr_leaf_adam = 2e-3 #8e-3
 
-  # tuned for batch_size = 200
-  lr_boost_adam = 2e-3 #5e-3
-  lr_leaf_adam = 2e-3 #8e-3
+  #mnist lr
+  lr_boost_adam = 2e-3
+  lr_leaf_adam = 2e-3
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
@@ -256,17 +300,9 @@ def main(_):
   gamma_leaf = 0.7
 
   # modify the default tensorflow graph.
-  dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types)
+  dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types, eval_type)
   saver = tf.train.Saver()
  
-  f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
-
-  train_set = [pt for pt in dataset(5000, f, 9122)]
-  val_set = [pt for pt in dataset(201, f)]
-  val_set = sorted(val_set, key = lambda x: x.x)
-
-  x_val = [ pt.x for pt in val_set]
-  y_val = [ pt.y for pt in val_set]
 
   init = tf.initialize_all_variables()
   sess = tf.Session()
@@ -279,11 +315,11 @@ def main(_):
   max_epoch = 50
   max_epoch_ult = max_epoch * 2
   batch_size = 200
-  val_interval = 1000
+  val_interval = 5000
   best_avg_loss = np.Inf 
   worsen_cnt = 0
   restore_threshold = len(train_set) / val_interval
-  model_path = '../model/best_model.ckpt'
+  model_path = '../model/best_model_' + model_name_suffix + '.ckpt'
   while epoch < max_epoch and epoch < max_epoch_ult:
     epoch += 1
     print("-----Epoch {:d}-----".format(epoch))
@@ -291,8 +327,12 @@ def main(_):
     for si in range(0, len(train_set), batch_size):
       #print 'train epoch={}, start={}'.format(epoch, si)
       si_end = min(si+batch_size, len(train_set))
-      x = [ pt.x for pt in train_set[si:si_end] ]
-      y = [ pt.y for pt in train_set[si:si_end] ]
+      if arun_1d_regress:
+        x = [ pt.x for pt in train_set[si:si_end] ]
+        y = [ pt.y for pt in train_set[si:si_end] ]
+      else:
+        x = x_tra[train_set[si:si_end]]
+        y = y_tra[train_set[si:si_end]]
       sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf))
       
       # Evaluate
@@ -303,13 +343,14 @@ def main(_):
                                                                 lr_boost, lr_leaf))
         assert(not np.isnan(avg_loss))
         # Plotting the fit.
-        plt.figure(1)
-        plt.clf()
-        plt.plot(x_val, preds, label='Prediction')
-        plt.plot(x_val, y_val, label='Ground Truth')
-        plt.legend(loc=4)
-        plt.draw()
-        plt.show(block=False)
+        if arun_1d_regress:
+          plt.figure(1)
+          plt.clf()
+          plt.plot(x_val, preds, label='Prediction')
+          plt.plot(x_val, y_val, label='Ground Truth')
+          plt.legend(loc=4)
+          plt.draw()
+          plt.show(block=False)
         print 'epoch={},t={} avg_loss : {}'.format(epoch, t, avg_loss)
 
         #if epoch < 4:
