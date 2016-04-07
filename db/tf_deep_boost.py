@@ -1,12 +1,14 @@
 #!/usr/bin/env python
-import numpy as np
-import matplotlib.pyplot as plt
+from collections import namedtuple
 import itertools
 from functools import partial
+import numpy as np
+import matplotlib.pyplot as plt
 from math import ceil, floor, sqrt, cos, sin
+import os,signal
 from timer import Timer
-from collections import namedtuple
-from IPython import embed
+
+import ipdb as pdb
 
 import tensorflow as tf
 
@@ -26,16 +28,23 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 def sigmoid_clf_mean(x):
+  """ Sigmoid GLM mean for classification 
+  Rescales sigmoid (probability) output [0,1]->[-1,1]
+  """
   return tf.sub(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.ones_like(x))
 
 def logistic_loss_eltws(yp, y):
+  """ Element-wise Logistic Loss. """
   return tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, y))), tf.ones_like(y)))
 
 def square_loss_eltws(yp, y):
+  """ Element-wise Square Loss. """
   return tf.scalar_mul(0.5, tf.square(tf.sub(yp, y)))
 
 def multi_clf_err(yp, y):
+  """ Multi-class classification Error """
   return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
+
 
 class TFLeafNode(object):
   """ Apply a K-dim generalized linear model 
@@ -213,6 +222,10 @@ class TFDeepBoostGraph(object):
     #endfor
     #flatten all train_ops in one list
     self.train_ops = list(itertools.chain.from_iterable(ll_train_ops)) # dbg.training()
+    # used to create checkpoints of the trained parameters, used for line search
+    self.saver = tf.train.Saver()
+    self.sigint_capture = False
+    signal.signal(signal.SIGINT, self.signal_handler)
     print 'done.'
   #end __init__
 
@@ -236,9 +249,13 @@ class TFDeepBoostGraph(object):
       return self.ll_nodes[-1][0].losses[-1]
     return self.eval_type(self.pred, self.y_placeholder)
 
+  def signal_handler(self, signal, frame):
+    print 'Interrupt Captured'
+    self.sigint_capture = True
+
 def main(_):
   # ------------- Dataset -------------
-  arun_1d_regress = False
+  arun_1d_regress = True 
   if arun_1d_regress:
     f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
     train_set = [pt for pt in dataset(5000, f, 9122)]
@@ -249,7 +266,7 @@ def main(_):
     model_name_suffix = '1d_reg'
 
     #n_nodes = [40, 20, 1]
-    n_nodes = [20, 1]
+    n_nodes = [5, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -301,8 +318,6 @@ def main(_):
 
   # modify the default tensorflow graph.
   dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types, eval_type)
-  saver = tf.train.Saver()
- 
 
   init = tf.initialize_all_variables()
   sess = tf.Session()
@@ -311,16 +326,27 @@ def main(_):
   print 'Initialization done'
   
   t = 0
+  # As we can waste an epoch with the line search, max_epoch will be incremented when a line search
+  # is done. However, to prevent infintie epochs, we set an ultimatum on the number of epochs
+  # (max_epoch_ult) that stops this.
   epoch = -1
-  max_epoch = 50
-  max_epoch_ult = max_epoch * 2
+  max_epoch = 50 
+  max_epoch_ult = max_epoch * 2 
   batch_size = 200
   val_interval = 2500
   best_avg_loss = np.Inf 
   worsen_cnt = 0
   restore_threshold = len(train_set) / val_interval
-  model_path = '../model/best_model_' + model_name_suffix + '.ckpt'
-  while epoch < max_epoch and epoch < max_epoch_ult:
+  model_dir = '../model/'
+  if not os.path.isdir(model_dir):
+      os.mkdir(model_dir)
+  best_model_fname = 'best_model_{}.ckpt'.format(model_name_suffix) 
+  init_model_fname = 'initial_model_{}.ckpt'.format(model_name_suffix) 
+  best_model_path = os.path.join(model_dir, best_model_fname)
+  init_model_path = os.path.join(model_dir, init_model_fname)
+  dbg.saver.save(sess, init_model_path)
+  stop_program = False
+  while not stop_program and epoch < max_epoch and epoch < max_epoch_ult:
     epoch += 1
     print("-----Epoch {:d}-----".format(epoch))
     np.random.shuffle(train_set)
@@ -333,6 +359,10 @@ def main(_):
       else:
         x = x_tra[train_set[si:si_end]]
         y = y_tra[train_set[si:si_end]]
+
+      if dbg.sigint_capture == True:
+         # don't do any work this iteration, restart all computation with the next
+         break
       sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf))
       
       # Evaluate
@@ -361,7 +391,7 @@ def main(_):
           worsen_cnt += 1
           if worsen_cnt > restore_threshold:
             print 'Restore to previous best loss: {}'.format(best_avg_loss)
-            saver.restore(sess, model_path)
+            dbg.saver.restore(sess, best_model_path)
             worsen_cnt = 0
             max_epoch += 1
             lr_boost *= gamma_boost
@@ -370,11 +400,19 @@ def main(_):
           worsen_cnt = 0
           lr_boost = lr_boost_adam
           lr_leaf = lr_leaf_adam
-          saver.save(sess, model_path)
+          dbg.saver.save(sess, best_model_path)
           best_avg_loss = avg_loss
     #endfor
+    if dbg.sigint_capture == True:
+      print("----------------------")
+      print("Paused. Set parameters before loading the initial model again...")
+      print("----------------------")
+      pdb.set_trace()
+      dbg.saver.restore(sess, init_model_path)
+      epoch = -1 ; t = 0; 
+      dbg.sigint_capture = False
   #endfor
-  embed()
+  print("Program Finished")
 
 if __name__ == '__main__':
   main(0)
