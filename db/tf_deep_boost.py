@@ -45,7 +45,6 @@ def multi_clf_err(yp, y):
   """ Multi-class classification Error """
   return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
 
-
 class TFLeafNode(object):
   """ Apply a K-dim generalized linear model 
       that maps the input x to K independently mapped dims.
@@ -258,7 +257,8 @@ def main(_):
   arun_1d_regress = True 
   if arun_1d_regress:
     f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
-    train_set = [pt for pt in dataset(5000, f, 9122)]
+    data_set_size = 200000
+    train_set = [pt for pt in dataset(data_set_size, f, 9122)]
     val_set = [pt for pt in dataset(201, f)]
     val_set = sorted(val_set, key = lambda x: x.x)
     x_val = [ pt.x for pt in val_set]
@@ -266,7 +266,7 @@ def main(_):
     model_name_suffix = '1d_reg'
 
     #n_nodes = [40, 20, 1]
-    n_nodes = [5, 1]
+    n_nodes = [20, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -304,12 +304,12 @@ def main(_):
   dims[-1] = output_dim 
 
   # tuned for batch_size = 200, arun 1-d regress
-  #lr_boost_adam = 2e-3 [50,1] #5e-3 [20,1]
-  #lr_leaf_adam = 2e-3 #8e-3
+  lr_boost_adam = 3e-4 #[50,1] #5e-3 [20,1]
+  lr_leaf_adam = 3e-4 #8e-3
 
   #mnist lr
-  lr_boost_adam = 2e-3
-  lr_leaf_adam = 2e-3
+  #lr_boost_adam = 2e-3
+  #lr_leaf_adam = 2e-3
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
@@ -330,13 +330,15 @@ def main(_):
   # is done. However, to prevent infintie epochs, we set an ultimatum on the number of epochs
   # (max_epoch_ult) that stops this.
   epoch = -1
-  max_epoch = 50 
+  max_epoch = np.Inf
   max_epoch_ult = max_epoch * 2 
   batch_size = 200
-  val_interval = 2500
+  val_interval = 500
   best_avg_loss = np.Inf 
   worsen_cnt = 0
   restore_threshold = len(train_set) / val_interval
+  do_line_search = False
+  min_non_ls_epochs = 4 # min. number of epochs in the beginning where we don't do line search
   model_dir = '../model/'
   if not os.path.isdir(model_dir):
       os.mkdir(model_dir)
@@ -383,25 +385,26 @@ def main(_):
           plt.show(block=False)
         print 'epoch={},t={} avg_loss : {}'.format(epoch, t, avg_loss)
 
-        #if epoch < 4:
-        continue
+        if epoch < min_non_ls_epochs:
+            continue
         
-        # restores if is worse than the best multiple times
-        if avg_loss > best_avg_loss:
-          worsen_cnt += 1
-          if worsen_cnt > restore_threshold:
-            print 'Restore to previous best loss: {}'.format(best_avg_loss)
-            dbg.saver.restore(sess, best_model_path)
-            worsen_cnt = 0
-            max_epoch += 1
-            lr_boost *= gamma_boost
-            lr_leaf *= gamma_leaf
-        else:
-          worsen_cnt = 0
-          lr_boost = lr_boost_adam
-          lr_leaf = lr_leaf_adam
-          dbg.saver.save(sess, best_model_path)
-          best_avg_loss = avg_loss
+        if do_line_search:
+            # restores if is worse than the best multiple times
+            if avg_loss > best_avg_loss:
+              worsen_cnt += 1
+              if worsen_cnt > restore_threshold:
+                print 'Restore to previous best loss: {}'.format(best_avg_loss)
+                dbg.saver.restore(sess, best_model_path)
+                worsen_cnt = 0
+                max_epoch += 1
+                lr_boost *= gamma_boost
+                lr_leaf *= gamma_leaf
+            else:
+              worsen_cnt = 0
+              lr_boost = lr_boost_adam
+              lr_leaf = lr_leaf_adam
+              dbg.saver.save(sess, best_model_path)
+              best_avg_loss = avg_loss
     #endfor
     if dbg.sigint_capture == True:
       print("----------------------")
