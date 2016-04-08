@@ -132,7 +132,7 @@ class TFBoostNode(object):
         if i == 0:
           ps = tf.tile(self.ps_b, tf.pack([batch_size, 1]))
         else:
-          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws[ci]))
+          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws[i-1]))
         self.psums.append(ps)
         self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
     return self.y_hats[-1]
@@ -304,8 +304,8 @@ def main(_):
   dims[-1] = output_dim 
 
   # tuned for batch_size = 200, arun 1-d regress
-  lr_boost_adam = 3e-4 #[50,1] #5e-3 [20,1]
-  lr_leaf_adam = 3e-4 #8e-3
+  lr_boost_adam = 5e-3 #[50,1] #5e-3 [20,1]
+  lr_leaf_adam = 8e-4 #8e-3
 
   #mnist lr
   #lr_boost_adam = 2e-3
