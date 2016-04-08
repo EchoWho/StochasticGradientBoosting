@@ -97,8 +97,10 @@ class TFLeafNode(object):
 
   def training(self, lr):
     self.optimizer = self.opt_type(lr)
-    self.train_op = self.optimizer.minimize(self.loss)
-    return self.train_op
+    compute_op = self.optimizer.compute_gradients(self.loss, [self.w, self.b])
+    self.apply_op = self.optimizer.apply_gradients(compute_op)
+    self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
+    return self.grads, [self.apply_op], []
 
 class TFBoostNode(object):
   def __init__(self, name, dim, mean_type, loss_type, opt_type, convert_y=True):
@@ -151,19 +153,26 @@ class TFBoostNode(object):
   def training(self, lr):
     with tf.name_scope(self.name):
       # optimizer (n_children) is for bias
-      self.train_ops = []
+      compute_ops = []
+      self.apply_ops = []
       self.children_tgts = []
       for i in range(self.n_children+1):
         opt = self.opt_type(lr)        
         if i == 0:
-          train_op = opt.minimize(self.losses[i], var_list=[self.tf_w, self.ps_b])
+          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_b])
+          apply_op = opt.apply_gradients(compute_op)
         else:
-          train_op = opt.minimize(self.losses[i], var_list=[self.tf_w, self.ps_ws[i-1]])
+          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_ws[i-1]])
+          apply_op = opt.apply_gradients(compute_op)
           grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
           self.children_tgts.append(grad_ps)
-        self.train_ops.append(train_op)
+        compute_ops.append(compute_op)
+        self.apply_ops.append(apply_op)
       #endfor 
-    return self.train_ops, self.children_tgts
+      # list of (grads, varname)
+      compute_ops = list(itertools.chain.from_iterable(compute_ops))
+      self.grads = [ op[0] for op in compute_ops ]
+    return self.grads, self.apply_ops, self.children_tgts
 
 class TFDeepBoostGraph(object):
   def __init__(self, dims, n_nodes, mean_types, loss_types, opt_types, eval_type=None):
@@ -204,23 +213,26 @@ class TFDeepBoostGraph(object):
     print 'Construct loss() and training()'
     # construct loss and training_op from top down
     tgts = [self.y_placeholder] # prediction target of nodes on a level (back to front)
-    ll_train_ops = []
+    ll_compute_ops = []
+    ll_apply_ops = []
     for i in reversed(range(len(n_nodes))):
       print 'depth={}'.format(i)
       l_nodes = self.ll_nodes[i]
       _ =  map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
       if i > 0:
-        trainop_tgts = map(lambda nd : nd.training(self.lr_boost), l_nodes)
-        l_train_ops, tgts = zip(*trainop_tgts)
-        l_train_ops = list(itertools.chain.from_iterable(l_train_ops)) #flatten the list
-        tgts = list(itertools.chain.from_iterable(tgts))
+        lr_lvl = self.lr_boost
       else:
-        l_train_ops = map(lambda x : x.training(self.lr_leaf), l_nodes) #every leaf node has one op.
-        
-      ll_train_ops.append(l_train_ops)
+        lr_lvl = self.lr_leaf
+      #endif
+      l_train_ops = zip(*map(lambda nd : nd.training(lr_lvl), l_nodes))
+      l_compute_ops, l_apply_ops, tgts = [ list(itertools.chain.from_iterable(ops)) 
+          for ops in l_train_ops]
+      ll_compute_ops.append(l_compute_ops)
+      ll_apply_ops.append(l_apply_ops)
     #endfor
     #flatten all train_ops in one list
-    self.train_ops = list(itertools.chain.from_iterable(ll_train_ops)) # dbg.training()
+    self.train_ops = list(itertools.chain.from_iterable(ll_compute_ops + ll_apply_ops)) # dbg.training()
+    #self.train_ops = list(itertools.chain.from_iterable(ll_apply_ops)) # dbg.training()
     # used to create checkpoints of the trained parameters, used for line search
     self.saver = tf.train.Saver()
     self.sigint_capture = False
@@ -308,8 +320,8 @@ def main(_):
   lr_leaf_adam = 8e-4 #8e-3
 
   #mnist lr
-  lr_boost_adam = 3e-3
-  lr_leaf_adam = 3e-3
+  #lr_boost_adam = 3e-3
+  #lr_leaf_adam = 3e-3
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
