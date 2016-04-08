@@ -98,9 +98,9 @@ class TFLeafNode(object):
   def training(self, lr):
     self.optimizer = self.opt_type(lr)
     compute_op = self.optimizer.compute_gradients(self.loss, [self.w, self.b])
-    self.apply_op = self.optimizer.apply_gradients(compute_op)
+    self.apply_op = [self.optimizer.apply_gradients(compute_op)]
     self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
-    return self.grads, [self.apply_op], []
+    return self.grads, self.apply_op, []
 
 class TFBoostNode(object):
   def __init__(self, name, dim, mean_type, loss_type, opt_type, convert_y=True):
@@ -124,7 +124,7 @@ class TFBoostNode(object):
           for ci in range(self.n_children)]
       self.tf_w = tf.Variable(
           tf.truncated_normal([self.dim[0], self.dim[1]],
-                              stddev=1.0 / sqrt(float(self.dim[0]))),
+                              stddev=3.0 / sqrt(float(self.dim[0]))),
           name='tf_weights')
       
       # TODO test version that doesn't store all partial sums
@@ -156,21 +156,33 @@ class TFBoostNode(object):
       compute_ops = []
       self.apply_ops = []
       self.children_tgts = []
-      for i in range(self.n_children+1):
-        opt = self.opt_type(lr)        
-        if i == 0:
-          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_b])
-          apply_op = opt.apply_gradients(compute_op)
-        else:
-          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_ws[i-1]])
-          apply_op = opt.apply_gradients(compute_op)
-          grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
-          self.children_tgts.append(grad_ps)
-        compute_ops.append(compute_op)
-        self.apply_ops.append(apply_op)
+      #for i in range(self.n_children+1):
+      #  opt = self.opt_type(lr)        
+      #  if i == 0:
+      #    compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_b])
+      #    apply_op = opt.apply_gradients(compute_op)
+      #  else:
+      #    compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_ws[i-1]])
+      #    apply_op = opt.apply_gradients(compute_op)
+      #    grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
+      #    self.children_tgts.append(grad_ps)
+      #  compute_ops.append(compute_op)
+      #  self.apply_ops.append(apply_op)
+      ##endfor 
+      ## list of (grads, varname)
+      #compute_ops = list(itertools.chain.from_iterable(compute_ops))
+      #self.grads = [ op[0] for op in compute_ops ]
+
+      # Compute the targets for the children
+      for i in range(1,self.n_children+1):
+        grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
+        self.children_tgts.append(grad_ps)
       #endfor 
-      # list of (grads, varname)
-      compute_ops = list(itertools.chain.from_iterable(compute_ops))
+      # compute_ops is list of (grads, varname)
+      opt = self.opt_type(lr) # construct the optimizer object 
+      compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]+self.ps_ws) 
+      # apply_ops is an tensor flow operation to update variables 
+      self.apply_ops = [opt.apply_gradients(compute_ops)]
       self.grads = [ op[0] for op in compute_ops ]
     return self.grads, self.apply_ops, self.children_tgts
 
@@ -278,7 +290,7 @@ def main(_):
     model_name_suffix = '1d_reg'
 
     #n_nodes = [40, 20, 1]
-    n_nodes = [20, 1]
+    n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -316,8 +328,8 @@ def main(_):
   dims[-1] = output_dim 
 
   # tuned for batch_size = 200, arun 1-d regress
-  lr_boost_adam = 5e-3 #[50,1] #5e-3 [20,1]
-  lr_leaf_adam = 8e-4 #8e-3
+  lr_boost_adam = 1e-3 #[50,1] #5e-3 [20,1]
+  lr_leaf_adam = 1e-3 #8e-3
 
   #mnist lr
   #lr_boost_adam = 3e-3
@@ -336,6 +348,7 @@ def main(_):
   print 'Initializing...'
   sess.run(init)
   print 'Initialization done'
+
   
   t = 0
   # As we can waste an epoch with the line search, max_epoch will be incremented when a line search
@@ -422,6 +435,9 @@ def main(_):
       print("----------------------")
       print("Paused. Set parameters before loading the initial model again...")
       print("----------------------")
+      # helper functions
+      save_model = lambda fname : dbg.saver.save(sess, fname)
+      save_best = partial(save_model, best_model_path)
       pdb.set_trace()
       dbg.saver.restore(sess, init_model_path)
       epoch = -1 ; t = 0; 
