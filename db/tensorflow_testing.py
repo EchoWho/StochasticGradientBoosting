@@ -28,14 +28,14 @@ def data_gen(num_pts):
     return np.reshape(x, (-1, 1)), np.reshape(y, (-1,1))
 
 if __name__ == "__main__":
-    nodes_per_layer = [50,50]
+    nodes_per_layer = [20]
     num_layers = len(nodes_per_layer)
     x_dim = 1 # feature dim
     y_dim = 1 # target dim
-    l2_lambda = 1e-3
-    num_batches = 1500 # number of passes through training data
+    l2_lambda = 0
+    num_batches = 2500 # number of passes through training data
 
-    num_data_pts = 50
+    num_data_pts = 150
     num_test = 200
     #tf.set_random_seed(1)
     #np.random.seed(1)
@@ -78,8 +78,9 @@ if __name__ == "__main__":
             regularization += tf.nn.l2_loss(W)+ tf.nn.l2_loss(B)
     #endfor
     y = Ls[-1] # output of last layer is our regression outptut
-    #indiv_loss = tf.nn.l2_loss(y_-y)
-    indiv_loss = tf.nn.l2_loss(y_-y)
+    #indiv_loss = tf.nn.l2_loss(y_-y) # computes sum() over all points
+    indiv_loss = tf.scalar_mul(0.5, tf.square(tf.sub(y_, y)))
+
     mean_loss = tf.reduce_mean(indiv_loss)
     total_loss = mean_loss + l2_lambda * regularization
     global_step = tf.Variable(0, name='global_step', trainable=False) # Counter
@@ -89,7 +90,7 @@ if __name__ == "__main__":
     #optimizer = tf.train.AdagradOptimizer(step_size)
     #optimizer = tf.train.RMSPropOptimizer(5e-3)
     #optimizer = tf.train.AdamOptimizer(3e-2, 0.9, 0.9999999, 1e-6)
-    optimizer = tf.train.AdamOptimizer(6e-3)
+    optimizer = tf.train.AdamOptimizer(8e-2)
     train_step = optimizer.minimize(total_loss, global_step=global_step)
     
     init_op = tf.initialize_all_variables()
@@ -106,30 +107,32 @@ if __name__ == "__main__":
         if i % 50 == 0:
             test_dict={x:test_x, y_:test_y}
             preds, test_loss= sess.run([y, total_loss], feed_dict=test_dict)
-            print 'my tensorflow dnn: {}'.format(test_loss)
+            print 'my tensorflow dnn: {:.3g}'.format(test_loss)
         train_loss[i] = losses
 
     test_dict={x:test_x, y_:test_y}
     preds, test_loss= sess.run([y, total_loss], feed_dict=test_dict)
-    print 'my tensorflow dnn: {}'.format(test_loss)
+    print 'my tensorflow dnn: {:.3g}'.format(test_loss)
 
     sess.close()
 
-    print('Starting skflow...')
-    import skflow
-    dnn = skflow.TensorFlowDNNRegressor(hidden_units=nodes_per_layer)
-    #dnn = skflow.TensorFlowDNNRegressor(hidden_units=nodes_per_layer,
-    #        batch_size=num_data_pts, steps=50, max_to_keep=0)
-    for i in range(10):
-        train_x, train_y = data_gen(num_data_pts)
-        dnn.partial_fit(train_x, train_y)
-    preds = dnn.predict(test_x)
-    err = pred_y-test_y; l2_err = 0.5*err*err
+    #`print('Starting skflow...')
+    #`import skflow
+    #`dnn = skflow.TensorFlowDNNRegressor(hidden_units=nodes_per_layer)
+    #`#dnn = skflow.TensorFlowDNNRegressor(hidden_units=nodes_per_layer,
+    #`#        batch_size=num_data_pts, steps=50, max_to_keep=0)
+    #`for i in range(5):
+    #`    train_x, train_y = data_gen(num_data_pts)
+    #`    dnn.partial_fit(train_x, train_y)
+    #`preds_skflow = dnn.predict(test_x)
+    #err = preds_skflow-test_y; l2_err = 0.5*err*err
+    #print 'skFlow dnn: {}'.format(l2_err.mean())
+
     plt.plot(test_x, test_y, label='Ground Truth')
-    plt.plot(test_x, preds, label='Backprop (Tensorflow)')
-    plt.legend(fontsize=14)
+    #plt.plot(test_x, preds_skflow, label='skflow')
+    plt.plot(test_x, preds, label='my tensorflow')
+    plt.legend(fontsize=14, loc=2)
     plt.show()
-    print 'skFlow dnn: {}'.format(l2_err.mean())
 
 
 
