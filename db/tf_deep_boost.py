@@ -266,11 +266,11 @@ def main(_):
     train_set = list(range(mnist.train.num_examples))
     x_tra = mnist.train.images
     y_tra = mnist.train.labels
-    x_val = mnist.test.images # validation
-    y_val = mnist.test.labels
+    x_val = mnist.validation.images # validation
+    y_val = mnist.validation.labels
     model_name_suffix = 'mnist'
 
-    n_nodes = [40, 8, 1]
+    n_nodes = [80, 40, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -291,8 +291,8 @@ def main(_):
   #lr_leaf_adam = 2e-3 #8e-3
 
   #mnist lr
-  lr_boost_adam = 2e-3
-  lr_leaf_adam = 2e-3
+  lr_boost_adam = 3e-3
+  lr_leaf_adam = 3e-3
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
@@ -315,10 +315,10 @@ def main(_):
   max_epoch = 50
   max_epoch_ult = max_epoch * 2
   batch_size = 200
-  val_interval = 2500
+  val_interval = 1000
   best_avg_loss = np.Inf 
   worsen_cnt = 0
-  restore_threshold = len(train_set) / val_interval
+  restore_threshold = 5
   model_path = '../model/best_model_' + model_name_suffix + '.ckpt'
   while epoch < max_epoch and epoch < max_epoch_ult:
     epoch += 1
@@ -351,7 +351,7 @@ def main(_):
           plt.legend(loc=4)
           plt.draw()
           plt.show(block=False)
-        print 'epoch={},t={} avg_loss : {}'.format(epoch, t, avg_loss)
+        print 'epoch={},t={} avg_loss={}'.format(epoch, t, avg_loss)
 
         #if epoch < 4:
         continue
