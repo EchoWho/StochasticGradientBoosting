@@ -45,6 +45,27 @@ def multi_clf_err(yp, y):
   """ Multi-class classification Error """
   return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
 
+def tf_linear(name, l, dim, bias=False):
+  with tf.name_scope(name):
+    w1 = tf.Variable(
+        tf.truncated_normal([dim[0], dim[1]],
+                            stddev=1.0 / sqrt(float(dim[0]))),
+        name='weights')
+    l1 = tf.matmul(l, w1, name='linear')
+    if not bias:
+      return l1, [w1]
+    b1 = tf.Variable(tf.zeros([dim[1]]), name='biases')
+    l2 = tf.nn.bias_add(l1, b1)
+    return l2, [w1, b1]
+
+def tf_bottleneck(name, l, dim):
+  with tf.name_scope(name):
+    l1, v1 = tf_linear('l1', l, dim)
+    r1 = tf.nn.relu(l1)
+    l2, v2 = tf_linear('l2', l1, [dim[1], dim[1]])
+    r2 = tf.nn.relu(l2)
+    return r2, v1+v2
+
 class TFLeafNode(object):
   """ Apply a K-dim generalized linear model 
       that maps the input x to K independently mapped dims.
@@ -98,6 +119,59 @@ class TFLeafNode(object):
   def training(self, lr):
     self.optimizer = self.opt_type(lr)
     compute_op = self.optimizer.compute_gradients(self.loss, [self.w, self.b])
+    self.apply_op = [self.optimizer.apply_gradients(compute_op)]
+    self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
+    return self.grads, self.apply_op, []
+
+class TFBottleneckLeafNode(object):
+  """ Apply a bottleneck (resnet) that outputs K dimensions. 
+      that maps the input x to K independently mapped dims.
+  """
+
+  def __init__(self, name, dim, mean_type, loss_type, opt_type):
+    """ record params of the node for construction in the future.
+
+    Args:
+      dim: (D, K)
+    """
+    self.name = name
+    self.dim = dim
+    self.mean_type = mean_type #e.g., tf.nn.relu
+    self.loss_type = loss_type # element-wise loss 
+    self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
+
+  def inference(self, x):
+    """ Construct inference part of the node: linear, relu, linear, relu 
+      
+    Args:
+      x: input tensor, float - [batch_size, dim[0]]
+    """
+    # linear transformation
+    bn, bn_var = tf_bottleneck(self.name + 'bn', x, [self.dim[0], self.dim[0]])
+    pred, pred_var = tf_linear(self.name + 'linear', bn, self.dim, True)
+    self.pred = self.mean_type(pred)
+    self.variables = bn_var + pred_var
+    return self.pred
+      
+  def loss(self, y):
+    """ Construct TF loss graph given the inference graph.
+
+    Args:
+      y: target (sign and magnitude on each dim), float - [batch_size, dim[1]] 
+    """
+    with tf.name_scope(self.name):
+      y_sgn = tf.sign(y, name='y_sgn') # target of dim
+      y_abs = tf.abs(y, name='y_abs')  # wgt of each dim 
+
+      # weighted average of loss_type(pred, y_sgn)
+      ind_loss = self.loss_type(self.pred, y_sgn)
+      wgt_loss = tf.mul(y_abs, ind_loss, 'wgt_loss')
+      self.loss = tf.reduce_mean(wgt_loss, name='avg_loss')
+    return self.loss
+
+  def training(self, lr):
+    self.optimizer = self.opt_type(lr)
+    compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
     self.apply_op = [self.optimizer.apply_gradients(compute_op)]
     self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
     return self.grads, self.apply_op, []
@@ -207,7 +281,7 @@ class TFDeepBoostGraph(object):
     for i in range(len(n_nodes)):
       dim = (dims[i], dims[i+1])
       if i == 0:
-        l_nodes = [TFLeafNode('leaf'+str(ni), dim, mean_types[i], loss_types[i], 
+        l_nodes = [TFBottleneckLeafNode('leaf'+str(ni), dim, mean_types[i], loss_types[i], 
             opt_types[i]) for ni in range(n_nodes[i])]  
         l_preds = map(lambda node : node.inference(self.x_placeholder), l_nodes)
       else:
