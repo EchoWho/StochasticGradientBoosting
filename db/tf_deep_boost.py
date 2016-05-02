@@ -58,20 +58,27 @@ def tf_linear(name, l, dim, bias=False):
     l2 = tf.nn.bias_add(l1, b1)
     return l2, [w1, b1]
 
-def tf_bottleneck(name, l, dim):
+def tf_linear_relu(name, l, dim, bias=False):
   with tf.name_scope(name):
-    l1, v1 = tf_linear('l1', l, dim)
-    r1 = tf.nn.relu(l1)
-    l2, v2 = tf_linear('l2', l1, [dim[1], dim[1]])
-    r2 = tf.nn.relu(l2)
-    return r2, v1+v2
+    l1, v1 = tf_linear(name+'li', l, dim, bias)
+    r1 = tf.nn.tanh(l1)
+    return r1, v1
+
+def tf_bottleneck(name, l, dim, last_relu=True):
+  with tf.name_scope(name):
+    r1, v1 = tf_linear_relu(name+'lr1', l, dim, bias=True)
+    l2, v2 = tf_linear(name+'l2', r1, [dim[1], dim[1]], bias=True)
+    if last_relu:
+      r2 = tf.nn.relu(l2)
+      return r2, v1+v2
+    return l2, v1+v2
 
 class TFLeafNode(object):
   """ Apply a K-dim generalized linear model 
       that maps the input x to K independently mapped dims.
   """
 
-  def __init__(self, name, dim, mean_type, loss_type, opt_type):
+  def __init__(self, name, dim, mean_type, loss_type, opt_type, convert_y = True):
     """ record params of the node for construction in the future.
 
     Args:
@@ -83,6 +90,7 @@ class TFLeafNode(object):
     #self.mean_type = lambda x, n : tf.nn.bias_add(tf.scalar_mul(2.0, tf.sigmoid(x)), -1.0, n)
     self.loss_type = loss_type # element-wise loss 
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
+    self.convert_y = convert_y
 
   def inference(self, x):
     """ Construct inference part of the node. 
@@ -107,13 +115,16 @@ class TFLeafNode(object):
       y: target (sign and magnitude on each dim), float - [batch_size, dim[1]] 
     """
     with tf.name_scope(self.name):
-      y_sgn = tf.sign(y, name='y_sgn') # target of dim
-      y_abs = tf.abs(y, name='y_abs')  # wgt of each dim 
+      if self.convert_y:
+        y_sgn = tf.sign(y, name='y_sgn') # target of dim
+        y_abs = tf.abs(y, name='y_abs')  # wgt of each dim 
 
-      # weighted average of loss_type(pred, y_sgn)
-      ind_loss = self.loss_type(self.pred, y_sgn)
-      wgt_loss = tf.mul(y_abs, ind_loss, 'wgt_loss')
-      self.loss = tf.reduce_mean(wgt_loss, name='avg_loss')
+        # weighted average of loss_type(pred, y_sgn)
+        ind_loss = self.loss_type(self.pred, y_sgn)
+        wgt_loss = tf.mul(y_abs, ind_loss, 'wgt_loss')
+        self.loss = tf.reduce_mean(wgt_loss, name='avg_loss')
+      else:
+        self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
     return self.loss
 
   def training(self, lr):
@@ -128,55 +139,6 @@ class TFBottleneckLeafNode(object):
       that maps the input x to K independently mapped dims.
   """
 
-  def __init__(self, name, dim, mean_type, loss_type, opt_type):
-    """ record params of the node for construction in the future.
-
-    Args:
-      dim: (D, K)
-    """
-    self.name = name
-    self.dim = dim
-    self.mean_type = mean_type #e.g., tf.nn.relu
-    self.loss_type = loss_type # element-wise loss 
-    self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
-
-  def inference(self, x):
-    """ Construct inference part of the node: linear, relu, linear, relu 
-      
-    Args:
-      x: input tensor, float - [batch_size, dim[0]]
-    """
-    # linear transformation
-    bn, bn_var = tf_bottleneck(self.name + 'bn', x, [self.dim[0], self.dim[0]])
-    pred, pred_var = tf_linear(self.name + 'linear', bn, self.dim, True)
-    self.pred = self.mean_type(pred)
-    self.variables = bn_var + pred_var
-    return self.pred
-      
-  def loss(self, y):
-    """ Construct TF loss graph given the inference graph.
-
-    Args:
-      y: target (sign and magnitude on each dim), float - [batch_size, dim[1]] 
-    """
-    with tf.name_scope(self.name):
-      y_sgn = tf.sign(y, name='y_sgn') # target of dim
-      y_abs = tf.abs(y, name='y_abs')  # wgt of each dim 
-
-      # weighted average of loss_type(pred, y_sgn)
-      ind_loss = self.loss_type(self.pred, y_sgn)
-      wgt_loss = tf.mul(y_abs, ind_loss, 'wgt_loss')
-      self.loss = tf.reduce_mean(wgt_loss, name='avg_loss')
-    return self.loss
-
-  def training(self, lr):
-    self.optimizer = self.opt_type(lr)
-    compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
-    self.apply_op = [self.optimizer.apply_gradients(compute_op)]
-    self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
-    return self.grads, self.apply_op, []
-
-class TFBoostNode(object):
   def __init__(self, name, dim, mean_type, loss_type, opt_type, convert_y=True):
     """ record params of the node for construction in the future.
 
@@ -190,12 +152,72 @@ class TFBoostNode(object):
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
     self.convert_y = convert_y
 
+  def inference(self, x):
+    """ Construct inference part of the node: linear, relu, linear, relu 
+      
+    Args:
+      x: input tensor, float - [batch_size, dim[0]]
+    """
+    bn, bn_var = tf_bottleneck(self.name + 'bn', x, [self.dim[0], self.dim[0]], last_relu=False)
+    self.pred = self.mean_type(bn)
+    self.variables = bn_var
+    return self.pred
+      
+  def loss(self, y):
+    """ Construct TF loss graph given the inference graph.
+
+    Args:
+      y: target (sign and magnitude on each dim), float - [batch_size, dim[1]] 
+    """
+    with tf.name_scope(self.name):
+      if self.convert_y:
+        y_sgn = tf.sign(y, name='y_sgn') # target of dim
+        y_abs = tf.abs(y, name='y_abs')  # wgt of each dim 
+           
+        # weighted average of loss_type(pred, y_sgn)
+        ind_loss = self.loss_type(self.pred, y_sgn)
+        wgt_loss = tf.mul(y_abs, ind_loss, 'wgt_loss')
+        self.loss = tf.reduce_mean(wgt_loss, name='avg_loss')
+      else:
+        self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
+    return self.loss
+
+  def training(self, lr):
+    self.optimizer = self.opt_type(lr)
+    compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
+    self.apply_op = [self.optimizer.apply_gradients(compute_op)]
+    self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
+    return self.grads, self.apply_op, []
+
+class TFBoostNode(object):
+  def __init__(self, name, dim, mean_type, loss_type, opt_type, ps_ws_val, convert_y=True):
+    """ record params of the node for construction in the future.
+
+    Args:
+      dim: (D, K)
+
+      convert_y : if true, convert input target to -1, 1 with weights of 
+        the original absolute value; else use input directly as learning targets. 
+    """
+    self.name = name
+    self.dim = dim
+    self.mean_type = mean_type #e.g., tf.nn.relu
+    self.loss_type = loss_type # element-wise loss 
+    self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
+    self.convert_y = convert_y
+    self.ps_ws_val = ps_ws_val
+
   def inference(self, children_preds, batch_size):
     self.n_children = len(children_preds)
     with tf.name_scope(self.name):
       self.ps_b = tf.Variable(tf.zeros([1,self.dim[0]]), name='ps_bias')
-      self.ps_ws = [tf.Variable(tf.zeros([1]), name='ps_weight_'+str(ci)) 
-          for ci in range(self.n_children)]
+      # learn ps_ws
+      #self.ps_ws = [tf.Variable(tf.zeros([1]), name='ps_weight_'+str(ci)) 
+      #    for ci in range(self.n_children)]
+      # Set constant weight for all ps_ws
+      # a list of ps_ws initialized using the given placeholder.
+      #self.ps_ws = tf.fill([self.n_children], self.ps_ws_val, 'ps_weights')
+
       self.tf_w = tf.Variable(
           tf.truncated_normal([self.dim[0], self.dim[1]],
                               stddev=3.0 / sqrt(float(self.dim[0]))),
@@ -208,7 +230,8 @@ class TFBoostNode(object):
         if i == 0:
           ps = tf.tile(self.ps_b, tf.pack([batch_size, 1]))
         else:
-          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws[i-1]))
+          # if we have a list of ps_val we can have a list of ps_ws #[i-1]))
+          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws_val)) 
         self.psums.append(ps)
         self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
     return self.y_hats[-1]
@@ -230,34 +253,38 @@ class TFBoostNode(object):
       compute_ops = []
       self.apply_ops = []
       self.children_tgts = []
-      #for i in range(self.n_children+1):
-      #  opt = self.opt_type(lr)        
-      #  if i == 0:
-      #    compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_b])
-      #    apply_op = opt.apply_gradients(compute_op)
-      #  else:
-      #    compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_ws[i-1]])
-      #    apply_op = opt.apply_gradients(compute_op)
-      #    grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
-      #    self.children_tgts.append(grad_ps)
-      #  compute_ops.append(compute_op)
-      #  self.apply_ops.append(apply_op)
-      ##endfor 
-      ## list of (grads, varname)
-      #compute_ops = list(itertools.chain.from_iterable(compute_ops))
-      #self.grads = [ op[0] for op in compute_ops ]
-
-      # Compute the targets for the children
-      for i in range(1,self.n_children+1):
-        grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
-        self.children_tgts.append(grad_ps)
+      # Learning combination weights of weak learners using partial losses.
+      for i in range(self.n_children+1):
+        opt = self.opt_type(lr)        
+        if i == 0:
+          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_b])
+          apply_op = opt.apply_gradients(compute_op)
+        else:
+          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w])
+          apply_op = opt.apply_gradients(compute_op)
+          grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
+          self.children_tgts.append(grad_ps)
+        compute_ops.append(compute_op)
+        self.apply_ops.append(apply_op)
       #endfor 
-      # compute_ops is list of (grads, varname)
-      opt = self.opt_type(lr) # construct the optimizer object 
-      compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]+self.ps_ws) 
-      # apply_ops is an tensor flow operation to update variables 
-      self.apply_ops = [opt.apply_gradients(compute_ops)]
+      # list of (grads, varname)
+      compute_ops = list(itertools.chain.from_iterable(compute_ops))
       self.grads = [ op[0] for op in compute_ops ]
+
+      ## Compute the targets for the children
+      #for i in range(1,self.n_children+1):
+      #  grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
+      #  self.children_tgts.append(grad_ps)
+      ##endfor 
+      ## compute_ops is list of (grads, varname)
+      #opt = self.opt_type(lr) # construct the optimizer object 
+      ## Learning the combining weights of weak learners (ps_ws using the final loss)
+      ##compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]+self.ps_ws) 
+      ## Learning only the transformation weight using the final loss
+      #compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]) 
+      ## apply_ops is an tensor flow operation to update variables 
+      #self.apply_ops = [opt.apply_gradients(compute_ops)]
+      #self.grads = [ op[0] for op in compute_ops ]
     return self.grads, self.apply_ops, self.children_tgts
 
 class TFDeepBoostGraph(object):
@@ -272,6 +299,7 @@ class TFDeepBoostGraph(object):
     self.batch_size = tf.placeholder(tf.int32, shape=[])
     self.lr_boost = tf.placeholder(tf.float32, shape=[]) # placeholder for future changes
     self.lr_leaf = tf.placeholder(tf.float32, shape=[]) 
+    self.ps_ws_val = tf.placeholder(tf.float32, shape=[])
 
     # construct inference from bottom up
     print 'Construct inference()'
@@ -282,11 +310,13 @@ class TFDeepBoostGraph(object):
       dim = (dims[i], dims[i+1])
       if i == 0:
         l_nodes = [TFBottleneckLeafNode('leaf'+str(ni), dim, mean_types[i], loss_types[i], 
-            opt_types[i]) for ni in range(n_nodes[i])]  
+            opt_types[i], False) for ni in range(n_nodes[i])]  
         l_preds = map(lambda node : node.inference(self.x_placeholder), l_nodes)
       else:
+        #l_nodes = [TFBoostNode('boost'+str(ni), dim, mean_types[i], loss_types[i], 
+        #    opt_types[i], self.ps_ws_val, i<len(n_nodes)-1) for ni in range(n_nodes[i])]  
         l_nodes = [TFBoostNode('boost'+str(ni), dim, mean_types[i], loss_types[i], 
-            opt_types[i], i<len(n_nodes)-1) for ni in range(n_nodes[i])]  
+            opt_types[i], self.ps_ws_val, False) for ni in range(n_nodes[i])]  
 
         assert(n_nodes[i-1] % n_nodes[i] == 0)
         nc = n_nodes[i-1] / n_nodes[i] #n_children
@@ -326,14 +356,16 @@ class TFDeepBoostGraph(object):
     print 'done.'
   #end __init__
 
-  def fill_feed_dict(self, x, y, lr_boost, lr_leaf):
+  def fill_feed_dict(self, x, y, lr_boost, lr_leaf, ps_ws_val):
     if isinstance(x, list):
       b_size = len(x)
     else:
       b_size = x.shape[0]
-    return { self.x_placeholder : x, self.y_placeholder : y,
-             self.batch_size : b_size, 
-             self.lr_boost : lr_boost, self.lr_leaf : lr_leaf}
+    feed_dict = { self.x_placeholder : x, self.y_placeholder : y,
+                 self.batch_size : b_size, 
+                 self.lr_boost : lr_boost, self.lr_leaf : lr_leaf,
+                 self.ps_ws_val : ps_ws_val}
+    return feed_dict
 
   def inference(self):
     return self.pred
@@ -366,9 +398,9 @@ def main(_):
     #n_nodes = [40, 20, 1]
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
-    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
+    mean_types = [ lambda x:x for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
-    loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
+    loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(square_loss_eltws)
     #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
@@ -411,8 +443,8 @@ def main(_):
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
-  gamma_boost = 0.7
-  gamma_leaf = 0.7
+  ps_ws_val = 1.0
+
 
   # modify the default tensorflow graph.
   dbg = TFDeepBoostGraph(dims, n_nodes, mean_types, loss_types, opt_types, eval_type)
@@ -431,13 +463,20 @@ def main(_):
   epoch = -1
   max_epoch = np.Inf
   max_epoch_ult = max_epoch * 2 
-  batch_size = 200
+  batch_size = 50
   val_interval = 500
-  best_avg_loss = np.Inf 
-  worsen_cnt = 0
-  restore_threshold = len(train_set) / val_interval
+
+  # if line search, these will shrink learning rate until result improves. 
   do_line_search = False
   min_non_ls_epochs = 4 # min. number of epochs in the beginning where we don't do line search
+  gamma_boost = 0.7
+  gamma_leaf = 0.7
+  # linesearch variables
+  worsen_cnt = 0
+  best_avg_loss = np.Inf 
+  restore_threshold = len(train_set) / val_interval
+
+  # Model saving paths. 
   model_dir = '../model/'
   if not os.path.isdir(model_dir):
       os.mkdir(model_dir)
@@ -446,6 +485,7 @@ def main(_):
   best_model_path = os.path.join(model_dir, best_model_fname)
   init_model_path = os.path.join(model_dir, init_model_fname)
   dbg.saver.save(sess, init_model_path)
+
   stop_program = False
   while not stop_program and epoch < max_epoch and epoch < max_epoch_ult:
     epoch += 1
@@ -464,14 +504,14 @@ def main(_):
       if dbg.sigint_capture == True:
          # don't do any work this iteration, restart all computation with the next
          break
-      sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf))
+      sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val))
       
       # Evaluate
       t += si_end-si
       if t % val_interval == 0:
         preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
                                    feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-                                                                lr_boost, lr_leaf))
+                                                                lr_boost, lr_leaf, ps_ws_val))
         assert(not np.isnan(avg_loss))
         # Plotting the fit.
         if arun_1d_regress:
