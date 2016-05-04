@@ -384,8 +384,10 @@ class TFDeepBoostGraph(object):
 
 def main(_):
   # ------------- Dataset -------------
-  arun_1d_regress = True 
-  if arun_1d_regress:
+  #dataset = 'arun_1d'
+  #dataset = 'mnist'
+  dataset = 'cifar'
+  if dataset == 'arun_1d':
     f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
     data_set_size = 200000
     train_set = [pt for pt in dataset(data_set_size, f, 9122)]
@@ -405,8 +407,7 @@ def main(_):
     #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
-
-  else:
+  elif dataset == 'mnist':
     from tensorflow.examples.tutorials.mnist import input_data
     mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
 
@@ -426,12 +427,37 @@ def main(_):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
 
+  elif dataset == 'cifar':
+    data = np.load('/data/data/processed_cifar_resnet.npz')
+    x_all = data['x_tra']; y_all = data['y_tra'];
+    yp_all = data['yp_tra'];
+    
+    n_train = x_all.shape[0] 
+    all_indices = np.arange(n_train)
+    np.random.shuffle(all_indices)
+    tra_val_split = 45000 #n_train * 9 // 10
+    tra_indices = all_indices[:tra_val_split]
+    val_indices = all_indices[tra_val_split:]
+
+    x_tra = x_all[tra_indices]; y_tra = y_all[tra_indices] 
+    x_val = x_all[val_indices]; y_val = y_all[val_indices]
+    model_name_suffix = 'cifar10'
+    
+    n_nodes = [50, 1]
+    n_lvls = len(n_nodes)
+    mean_types = [ lambda x : x for lvl in range(n_lvls-1) ]
+    mean_types.append(lambda x : x)
+    loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
+    loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
+    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    eval_type = multi_clf_err
+
+
   input_dim = len(x_val[0].ravel())
   output_dim = len(y_val[0].ravel())
 
   dims = [output_dim for _ in xrange(n_lvls+1)] 
   dims[0] = input_dim
-  dims[-1] = output_dim 
 
   # tuned for batch_size = 200, arun 1-d regress
   lr_boost_adam = 1e-3 #[50,1] #5e-3 [20,1]
@@ -494,10 +520,10 @@ def main(_):
     for si in range(0, len(train_set), batch_size):
       #print 'train epoch={}, start={}'.format(epoch, si)
       si_end = min(si+batch_size, len(train_set))
-      if arun_1d_regress:
+      if dataset == 'arun_1d':
         x = [ pt.x for pt in train_set[si:si_end] ]
         y = [ pt.y for pt in train_set[si:si_end] ]
-      else:
+      elif dataset == 'mnist' or dataset == 'cifar':
         x = x_tra[train_set[si:si_end]]
         y = y_tra[train_set[si:si_end]]
 
