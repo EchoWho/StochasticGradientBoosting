@@ -32,28 +32,37 @@ def load_cifar_model(n, param_file, sess):
 
 def load_cifar_train_test():
     """
-    :rtype - Returns tuple with train batches and test batches.
-            d_train[0] is the first batch.
-            d_train[0][0] corresponds to the images in the first batch
-            d_train[0][1] corresponds to the labels in the first batch
+    :rtype - Returns tuple with train data and test data.
+            d_train[0] are the *images* in the train set
+            d_train[1] are the *labels* in the train set
     """
+    def convert_mini_to_full_batch(batches):
+        images = np.vstack([batch[0] for batch in batches])
+        labels = np.hstack([batch[1] for batch in batches])
+        return images,labels
+
     ds_train = cifar.get_data('train')
     d_train = [d for d in ds_train.get_data()]
+
     ds_test = cifar.get_data('test')
     d_test = [d for d in ds_test.get_data()]
-    return d_train, d_test
+    return convert_mini_to_full_batch(d_train), convert_mini_to_full_batch(d_test)
 
 if __name__ == "__main__":
     """
     Example for how to load trained tensorpack model for cifar resnet
     """
     n = 5 # default value
+    out_file = '/data/data/processed_cifar_resnet.npz'
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('n', default=n, 
+    parser.add_argument('-n', default=n, 
         help='Number of bottlenecks for loading model (default n={})'.format(n))
+    parser.add_argument('-s', default=out_file, 
+        help='Location to save cifar data (default {})'.format(out_file))
     args = parser.parse_args()
     n = int(args.n)
+    out_file = args.s
     if n == 5:
         param_file = '/data/src/tensorpack/train_log/cifar10-resnet/model-195000'
     elif n == 18:
@@ -61,18 +70,42 @@ if __name__ == "__main__":
     else:
         raise Exception('No model known for n={}'.format(n))
     print('Running n = {} with model file {}'.format(n, param_file))
+    d_train, d_test = load_cifar_train_test()
     sess = tf.Session()
     model = load_cifar_model(n, param_file, sess)
-    d_train, d_test = load_cifar_train_test()
     batch_acc = np.zeros(len(d_test))
 
-    for i,batch in enumerate(d_test):
-        images = batch[0]
-        labels = batch[1]
-        # can also pass in labels with  model.label:labels
-        gap, probs  = sess.run([model.gap, model.probs], feed_dict={model.image:images})
-        ypred = probs.argmax(axis=1)
-        batch_acc[i] = np.sum(ypred == labels)/float(len(labels))
-    print('Overall accuracy: {:3.2f}%'.format(np.mean(batch_acc)*100.))
+    batch_size = 128
+    images = d_train[0]; labels_train = d_train[1]
+    gap_train = []; probs_train = []
+    for si in range(0, images.shape[0], batch_size):
+        si_end = min(si+batch_size, images.shape[0])
+        gap_train_i, probs_train_i  = sess.run([model.gap, model.probs],
+            feed_dict={model.image:images[si:si_end]})
+        gap_train.append(gap_train_i)
+        probs_train.append(probs_train_i)
+    gap_train = np.vstack(gap_train)
+    probs_train = np.vstack(probs_train)
+
+    images = d_test[0]; labels_test = d_test[1]
+    gap_test, probs_test  = sess.run([model.gap, model.probs], feed_dict={model.image:images})
+    # can also pass in labels with  model.label:labels
+    ypred = probs_test.argmax(axis=1)
+    print('Overall accuracy: {:3.2f}%'.format(np.sum(ypred==labels_test)/float(len(labels_test))*100.))
+
+    def convert_to_one_hot(labels):
+      n_samples = labels.shape[0]
+      one_hot = np.zeros((n_samples, 10))
+      one_hot[np.arange(n_samples), labels] = 1.
+      return one_hot
+    # before saving, convert labels to one-hot encoding
+    labels_train = convert_to_one_hot(labels_train)
+    labels_test = convert_to_one_hot(labels_test)
+
+    np.savez(out_file, 
+        x_tra=gap_train, y_tra=labels_train, yp_tra=probs_train, 
+        x_test=gap_test, y_test=labels_test, yp_test=probs_test) 
+    print('Saved to: {}'.format(out_file))
+
 
     embed()
