@@ -158,7 +158,7 @@ class TFBottleneckLeafNode(object):
     Args:
       x: input tensor, float - [batch_size, dim[0]]
     """
-    bn, bn_var = tf_bottleneck(self.name + 'bn', x, [self.dim[0], self.dim[0]], last_relu=False)
+    bn, bn_var = tf_bottleneck(self.name + 'bn', x, [self.dim[0], self.dim[1]], last_relu=False)
     self.pred = self.mean_type(bn)
     self.variables = bn_var
     return self.pred
@@ -407,6 +407,12 @@ def main(_):
     #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
+
+    # tuned for batch_size = 200, arun 1-d regress
+    lr_boost_adam = 1e-3 #[50,1] #5e-3 [20,1]
+    lr_leaf_adam = 1e-3 #8e-3
+    ps_ws_val = 1.0
+
   elif dataset == 'mnist':
     from tensorflow.examples.tutorials.mnist import input_data
     mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
@@ -426,11 +432,19 @@ def main(_):
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
+    
+    #mnist lr
+    lr_boost_adam = 3e-3
+    lr_leaf_adam = 3e-3
+    ps_ws_val = 1.0
 
   elif dataset == 'cifar':
     data = np.load('/data/data/processed_cifar_resnet.npz')
     x_all = data['x_tra']; y_all = data['y_tra'];
     yp_all = data['yp_tra'];
+
+    x_test = data['x_test']; y_test = data['y_test'];
+    yp_test = data['yp_test'];
     
     n_train = x_all.shape[0] 
     all_indices = np.arange(n_train)
@@ -452,6 +466,16 @@ def main(_):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
 
+    ##### Use all train and test:
+    x_tra = x_all; y_tra = y_all; yp_tra = yp_all;
+    x_val = x_test; y_val = y_test; yp_val = yp_test;
+
+    train_set = list(range(x_tra.shape[0]))
+
+    #cifar lr
+    lr_boost_adam = 1e-4
+    lr_leaf_adam = 1e-4
+    ps_ws_val = 1.0
 
   input_dim = len(x_val[0].ravel())
   output_dim = len(y_val[0].ravel())
@@ -459,17 +483,8 @@ def main(_):
   dims = [output_dim for _ in xrange(n_lvls+1)] 
   dims[0] = input_dim
 
-  # tuned for batch_size = 200, arun 1-d regress
-  lr_boost_adam = 1e-3 #[50,1] #5e-3 [20,1]
-  lr_leaf_adam = 1e-3 #8e-3
-
-  #mnist lr
-  #lr_boost_adam = 3e-3
-  #lr_leaf_adam = 3e-3
-
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
-  ps_ws_val = 1.0
 
 
   # modify the default tensorflow graph.
@@ -534,13 +549,14 @@ def main(_):
       
       # Evaluate
       t += si_end-si
+      if si_end-si < batch_size: t = 0;
       if t % val_interval == 0:
         preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
                                    feed_dict=dbg.fill_feed_dict(x_val, y_val, 
                                                                 lr_boost, lr_leaf, ps_ws_val))
         assert(not np.isnan(avg_loss))
         # Plotting the fit.
-        if arun_1d_regress:
+        if dataset == 'arun_1d':
           plt.figure(1)
           plt.clf()
           plt.plot(x_val, preds, label='Prediction')
