@@ -15,7 +15,7 @@ import tensorflow as tf
 DataPt = namedtuple('DataPt', ['x','y'])
 MAX_X=5
 # dataset generator function
-def dataset(num_pts, f, seed=None):
+def dataset_1d(num_pts, f, seed=None):
     if seed is not None:
       np.random.seed(seed)
     for _ in xrange(num_pts-1):
@@ -61,15 +61,15 @@ def tf_linear(name, l, dim, bias=False):
 def tf_linear_relu(name, l, dim, bias=False):
   with tf.name_scope(name):
     l1, v1 = tf_linear(name+'li', l, dim, bias)
-    r1 = tf.nn.tanh(l1)
+    r1 = tf.nn.sigmoid(l1)
     return r1, v1
 
 def tf_bottleneck(name, l, dim, last_relu=True):
   with tf.name_scope(name):
-    r1, v1 = tf_linear_relu(name+'lr1', l, dim, bias=True)
-    l2, v2 = tf_linear(name+'l2', r1, [dim[1], dim[1]], bias=True)
+    r1, v1 = tf_linear_relu(name+'lr1', l, [dim[0], dim[1]], bias=True)
+    l2, v2 = tf_linear(name+'l2', r1, [dim[1], dim[2]], bias=True)
     if last_relu:
-      r2 = tf.nn.relu(l2)
+      r2 = tf.nn.sigmoid(l2)
       return r2, v1+v2
     return l2, v1+v2
 
@@ -139,7 +139,7 @@ class TFBottleneckLeafNode(object):
       that maps the input x to K independently mapped dims.
   """
 
-  def __init__(self, name, dim, mean_type, loss_type, opt_type, convert_y=True):
+  def __init__(self, name, dim, reg_lambda, mean_type, loss_type, opt_type, convert_y=True):
     """ record params of the node for construction in the future.
 
     Args:
@@ -147,6 +147,7 @@ class TFBottleneckLeafNode(object):
     """
     self.name = name
     self.dim = dim
+    self.reg_lambda = reg_lambda
     self.mean_type = mean_type #e.g., tf.nn.relu
     self.loss_type = loss_type # element-wise loss 
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
@@ -158,7 +159,8 @@ class TFBottleneckLeafNode(object):
     Args:
       x: input tensor, float - [batch_size, dim[0]]
     """
-    bn, bn_var = tf_bottleneck(self.name + 'bn', x, [self.dim[0], self.dim[1]], last_relu=False)
+    bn, bn_var = tf_bottleneck(self.name + 'bn', x, 
+        self.dim, last_relu=False)
     self.pred = self.mean_type(bn)
     self.variables = bn_var
     return self.pred
@@ -180,17 +182,27 @@ class TFBottleneckLeafNode(object):
         self.loss = tf.reduce_mean(wgt_loss, name='avg_loss')
       else:
         self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
+
+    self.regularized_loss()
     return self.loss
+
+  def regularized_loss(self):
+    with tf.name_scope(self.name):
+      regulation = 0.0
+      for variable in self.variables:
+        regulation += self.reg_lambda * tf.reduce_sum(tf.square(tf.reshape(variable,[-1])))
+      self.regularized_loss = self.loss + regulation
+    return self.regularized_loss
 
   def training(self, lr):
     self.optimizer = self.opt_type(lr)
-    compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
+    compute_op = self.optimizer.compute_gradients(self.regularized_loss, self.variables)
     self.apply_op = [self.optimizer.apply_gradients(compute_op)]
     self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
     return self.grads, self.apply_op, []
 
 class TFBoostNode(object):
-  def __init__(self, name, dim, mean_type, loss_type, opt_type, ps_ws_val, convert_y=True):
+  def __init__(self, name, dim, reg_lambda, mean_type, loss_type, opt_type, ps_ws_val, convert_y=True):
     """ record params of the node for construction in the future.
 
     Args:
@@ -201,6 +213,7 @@ class TFBoostNode(object):
     """
     self.name = name
     self.dim = dim
+    self.reg_lambda = reg_lambda
     self.mean_type = mean_type #e.g., tf.nn.relu
     self.loss_type = loss_type # element-wise loss 
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
@@ -233,7 +246,7 @@ class TFBoostNode(object):
           # if we have a list of ps_val we can have a list of ps_ws #[i-1]))
           ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws_val)) 
         self.psums.append(ps)
-        self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
+        self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w) + ps))
     return self.y_hats[-1]
 
   def loss(self, y):
@@ -245,7 +258,15 @@ class TFBoostNode(object):
             for y_hat in self.y_hats ]
       else:
         self.losses = [ tf.reduce_mean(self.loss_type(y_hat, y)) for y_hat in self.y_hats ]
+    self.regularized_loss()
     return self.losses
+
+  def regularized_loss(self):
+    with tf.name_scope(self.name):
+      self.regulation = self.reg_lambda *\
+        (tf.reduce_sum(tf.square(self.tf_w),[0,1])+tf.reduce_sum(tf.square(self.ps_b)))
+      self.regularized_losses = [ loss + self.regulation for loss in self.losses]
+    return self.regularized_losses
       
   def training(self, lr):
     with tf.name_scope(self.name):
@@ -257,12 +278,12 @@ class TFBoostNode(object):
       for i in range(self.n_children+1):
         opt = self.opt_type(lr)        
         if i == 0:
-          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w, self.ps_b])
+          compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w, self.ps_b])
           apply_op = opt.apply_gradients(compute_op)
         else:
-          compute_op = opt.compute_gradients(self.losses[i], var_list=[self.tf_w])
+          compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w])
           apply_op = opt.apply_gradients(compute_op)
-          grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
+          grad_ps = tf.neg(tf.gradients(self.regularized_losses[i], [self.psums[i-1]])[0])
           self.children_tgts.append(grad_ps)
         compute_ops.append(compute_op)
         self.apply_ops.append(apply_op)
@@ -300,22 +321,31 @@ class TFDeepBoostGraph(object):
     self.lr_boost = tf.placeholder(tf.float32, shape=[]) # placeholder for future changes
     self.lr_leaf = tf.placeholder(tf.float32, shape=[]) 
     self.ps_ws_val = tf.placeholder(tf.float32, shape=[])
+    self.reg_lambda = tf.placeholder(tf.float32, shape=[])
 
     # construct inference from bottom up
     print 'Construct inference()'
     self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]))
     self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]))
     self.ll_nodes = []
+    dim_index = 0
     for i in range(len(n_nodes)):
-      dim = (dims[i], dims[i+1])
       if i == 0:
-        l_nodes = [TFBottleneckLeafNode('leaf'+str(ni), dim, mean_types[i], loss_types[i], 
+        dim_index_end = dim_index+3
+        dim = dims[dim_index:dim_index_end]; dim_index = dim_index_end-1
+
+        l_nodes = [TFBottleneckLeafNode('leaf'+str(ni), dim, self.reg_lambda, 
+            mean_types[i], loss_types[i], 
             opt_types[i], False) for ni in range(n_nodes[i])]  
         l_preds = map(lambda node : node.inference(self.x_placeholder), l_nodes)
       else:
+        dim_index_end = dim_index+2
+        dim = dims[dim_index:dim_index_end]; dim_index = dim_index_end-1
+
         #l_nodes = [TFBoostNode('boost'+str(ni), dim, mean_types[i], loss_types[i], 
         #    opt_types[i], self.ps_ws_val, i<len(n_nodes)-1) for ni in range(n_nodes[i])]  
-        l_nodes = [TFBoostNode('boost'+str(ni), dim, mean_types[i], loss_types[i], 
+        l_nodes = [TFBoostNode('boost'+str(ni), dim, self.reg_lambda, 
+            mean_types[i], loss_types[i], 
             opt_types[i], self.ps_ws_val, False) for ni in range(n_nodes[i])]  
 
         assert(n_nodes[i-1] % n_nodes[i] == 0)
@@ -356,7 +386,7 @@ class TFDeepBoostGraph(object):
     print 'done.'
   #end __init__
 
-  def fill_feed_dict(self, x, y, lr_boost, lr_leaf, ps_ws_val):
+  def fill_feed_dict(self, x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda):
     if isinstance(x, list):
       b_size = len(x)
     else:
@@ -364,7 +394,8 @@ class TFDeepBoostGraph(object):
     feed_dict = { self.x_placeholder : x, self.y_placeholder : y,
                  self.batch_size : b_size, 
                  self.lr_boost : lr_boost, self.lr_leaf : lr_leaf,
-                 self.ps_ws_val : ps_ws_val}
+                 self.ps_ws_val : ps_ws_val,
+                 self.reg_lambda : reg_lambda}
     return feed_dict
 
   def inference(self):
@@ -384,17 +415,23 @@ class TFDeepBoostGraph(object):
 
 def main(_):
   # ------------- Dataset -------------
-  #dataset = 'arun_1d'
-  #dataset = 'mnist'
-  dataset = 'cifar'
+  from textmenu import textmenu
+  datasets = ['arun_1d', 'mnist', 'cifar']
+  indx = textmenu(datasets)
+  if indx == None:
+      return
+  dataset = datasets[indx]
   if dataset == 'arun_1d':
     f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
     data_set_size = 200000
-    train_set = [pt for pt in dataset(data_set_size, f, 9122)]
-    val_set = [pt for pt in dataset(201, f)]
+    all_data = [pt for pt in dataset_1d(data_set_size, f, 9122)]
+    train_set = list(range(data_set_size))
+    val_set = [pt for pt in dataset_1d(201, f)]
     val_set = sorted(val_set, key = lambda x: x.x)
-    x_val = [ pt.x for pt in val_set]
-    y_val = [ pt.y for pt in val_set]
+    x_tra = np.expand_dims(np.hstack([ pt.x for pt in all_data]), 1)
+    y_tra = np.expand_dims(np.hstack([ pt.y for pt in all_data]), 1)
+    x_val = np.expand_dims(np.hstack([ pt.x for pt in val_set]), 1)
+    y_val = np.expand_dims(np.hstack([ pt.y for pt in val_set]), 1)
     model_name_suffix = '1d_reg'
 
     #n_nodes = [40, 20, 1]
@@ -404,14 +441,15 @@ def main(_):
     mean_types.append(lambda x : x)
     loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(square_loss_eltws)
-    #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
-    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
+    #opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
     # tuned for batch_size = 200, arun 1-d regress
     lr_boost_adam = 1e-3 #[50,1] #5e-3 [20,1]
     lr_leaf_adam = 1e-3 #8e-3
     ps_ws_val = 1.0
+    reg_lambda = 0.0
 
   elif dataset == 'mnist':
     from tensorflow.examples.tutorials.mnist import input_data
@@ -424,7 +462,7 @@ def main(_):
     y_val = mnist.validation.labels
     model_name_suffix = 'mnist'
 
-    n_nodes = [80, 40, 1]
+    n_nodes = [80, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -437,6 +475,7 @@ def main(_):
     lr_boost_adam = 3e-3
     lr_leaf_adam = 3e-3
     ps_ws_val = 1.0
+    reg_lambda = 0.0
 
   elif dataset == 'cifar':
     data = np.load('/data/data/processed_cifar_resnet.npz')
@@ -463,6 +502,8 @@ def main(_):
     mean_types.append(lambda x : x)
     loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
+
+    #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
 
@@ -473,15 +514,17 @@ def main(_):
     train_set = list(range(x_tra.shape[0]))
 
     #cifar lr
-    lr_boost_adam = 1e-4
-    lr_leaf_adam = 1e-4
+    lr_boost_adam = 1e-3
+    lr_leaf_adam = 1e-3
     ps_ws_val = 1.0
+    reg_lambda = 1e-4
 
   input_dim = len(x_val[0].ravel())
   output_dim = len(y_val[0].ravel())
 
-  dims = [output_dim for _ in xrange(n_lvls+1)] 
+  dims = [output_dim for _ in xrange(n_lvls+2)] 
   dims[0] = input_dim
+  dims[1] = input_dim # TODO do it in better style
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
@@ -535,25 +578,25 @@ def main(_):
     for si in range(0, len(train_set), batch_size):
       #print 'train epoch={}, start={}'.format(epoch, si)
       si_end = min(si+batch_size, len(train_set))
-      if dataset == 'arun_1d':
-        x = [ pt.x for pt in train_set[si:si_end] ]
-        y = [ pt.y for pt in train_set[si:si_end] ]
-      elif dataset == 'mnist' or dataset == 'cifar':
-        x = x_tra[train_set[si:si_end]]
-        y = y_tra[train_set[si:si_end]]
-
+      x = x_tra[train_set[si:si_end]]
+      y = y_tra[train_set[si:si_end]]
+      
       if dbg.sigint_capture == True:
          # don't do any work this iteration, restart all computation with the next
          break
-      sess.run(dbg.training(), feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val))
+      sess.run(dbg.training(), 
+            feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda))
       
       # Evaluate
       t += si_end-si
       if si_end-si < batch_size: t = 0;
       if t % val_interval == 0:
+        preds_tra, avg_loss_tra = sess.run([dbg.inference(), dbg.evaluation()],
+            feed_dict=dbg.fill_feed_dict(x_tra[:5000], y_tra[:5000], 
+                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
         preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
-                                   feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-                                                                lr_boost, lr_leaf, ps_ws_val))
+            feed_dict=dbg.fill_feed_dict(x_val, y_val, 
+                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
         assert(not np.isnan(avg_loss))
         # Plotting the fit.
         if dataset == 'arun_1d':
@@ -564,7 +607,7 @@ def main(_):
           plt.legend(loc=4)
           plt.draw()
           plt.show(block=False)
-        print 'epoch={},t={} avg_loss={}'.format(epoch, t, avg_loss)
+        print 'epoch={},t={} avg_loss={} avg_loss_tra={}'.format(epoch, t, avg_loss, avg_loss_tra)
 
         if epoch < min_non_ls_epochs:
             continue
