@@ -127,7 +127,7 @@ class TFLeafNode(object):
         self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
     return self.loss
 
-  def training(self, lr):
+  def training(self, y, lr):
     self.optimizer = self.opt_type(lr)
     compute_op = self.optimizer.compute_gradients(self.loss, [self.w, self.b])
     self.apply_op = [self.optimizer.apply_gradients(compute_op)]
@@ -157,12 +157,13 @@ class TFBottleneckLeafNode(object):
     """ Construct inference part of the node: linear, relu, linear, relu 
       
     Args:
-      x: input tensor, float - [batch_size, dim[0]]
+      x: input tensor, float - [batch_size, intermediate_dim, dim[0]]
     """
-    bn, bn_var = tf_bottleneck(self.name + 'bn', x, 
-        self.dim, last_relu=False)
-    self.pred = self.mean_type(bn)
-    self.variables = bn_var
+    bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, last_relu=False)
+    bn_tf = self.mean_type(bn)
+    #li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
+    self.pred = bn_tf #+ li_tf
+    self.variables = bn_var #+ li_tf_var
     return self.pred
       
   def loss(self, y):
@@ -194,7 +195,7 @@ class TFBottleneckLeafNode(object):
       self.regularized_loss = self.loss + regulation
     return self.regularized_loss
 
-  def training(self, lr):
+  def training(self, y, lr):
     self.optimizer = self.opt_type(lr)
     compute_op = self.optimizer.compute_gradients(self.regularized_loss, self.variables)
     self.apply_op = [self.optimizer.apply_gradients(compute_op)]
@@ -231,10 +232,7 @@ class TFBoostNode(object):
       # a list of ps_ws initialized using the given placeholder.
       #self.ps_ws = tf.fill([self.n_children], self.ps_ws_val, 'ps_weights')
 
-      self.tf_w = tf.Variable(
-          tf.truncated_normal([self.dim[0], self.dim[1]],
-                              stddev=3.0 / sqrt(float(self.dim[0]))),
-          name='tf_weights')
+      self.tf_w = tf.Variable(np.eye(self.dim[0], self.dim[1], dtype=np.float32), name='tf_weights')
       
       # TODO test version that doesn't store all partial sums
       self.psums = []
@@ -242,11 +240,14 @@ class TFBoostNode(object):
       for i in range(self.n_children+1):
         if i == 0:
           ps = tf.tile(self.ps_b, tf.pack([batch_size, 1]))
+        elif i==1:
+          # The first weak learner directly predicts the target and thus is not weighted.
+          ps = tf.add(ps, children_preds[i-1])
         else:
           # if we have a list of ps_val we can have a list of ps_ws #[i-1]))
           ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws_val)) 
         self.psums.append(ps)
-        self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w) + ps))
+        self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
     return self.y_hats[-1]
 
   def loss(self, y):
@@ -268,7 +269,7 @@ class TFBoostNode(object):
       self.regularized_losses = [ loss + self.regulation for loss in self.losses]
     return self.regularized_losses
       
-  def training(self, lr):
+  def training(self, y, lr):
     with tf.name_scope(self.name):
       # optimizer (n_children) is for bias
       compute_ops = []
@@ -278,15 +279,22 @@ class TFBoostNode(object):
       for i in range(self.n_children+1):
         opt = self.opt_type(lr)        
         if i == 0:
-          compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w, self.ps_b])
+          compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.ps_b])
           apply_op = opt.apply_gradients(compute_op)
         else:
-          compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w])
-          apply_op = opt.apply_gradients(compute_op)
-          grad_ps = tf.neg(tf.gradients(self.regularized_losses[i], [self.psums[i-1]])[0])
+          compute_op = None
+          apply_op = None
+          if i == self.n_children:
+            compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w])
+            apply_op = opt.apply_gradients(compute_op)
+          if i>1:
+            grad_ps = tf.neg(tf.gradients(self.regularized_losses[i], [self.psums[i-1]])[0])
+          else:
+            grad_ps = y - self.ps_b
           self.children_tgts.append(grad_ps)
-        compute_ops.append(compute_op)
-        self.apply_ops.append(apply_op)
+        if compute_op is not None: # this implies apply op is not None
+          compute_ops.append(compute_op)
+          self.apply_ops.append(apply_op)
       #endfor 
       # list of (grads, varname)
       compute_ops = list(itertools.chain.from_iterable(compute_ops))
@@ -370,7 +378,7 @@ class TFDeepBoostGraph(object):
       else:
         lr_lvl = self.lr_leaf
       #endif
-      l_train_ops = zip(*map(lambda nd : nd.training(lr_lvl), l_nodes))
+      l_train_ops = zip(*map(lambda nd : nd.training(self.y_placeholder, lr_lvl), l_nodes))
       l_compute_ops, l_apply_ops, tgts = [ list(itertools.chain.from_iterable(ops)) 
           for ops in l_train_ops]
       ll_compute_ops.append(l_compute_ops)
@@ -441,14 +449,14 @@ def main(_):
     mean_types.append(lambda x : x)
     loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(square_loss_eltws)
-    opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
-    #opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
+    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
     # tuned for batch_size = 200, arun 1-d regress
-    lr_boost_adam = 1e-3 #[50,1] #5e-3 [20,1]
-    lr_leaf_adam = 1e-3 #8e-3
-    ps_ws_val = 1.0
+    lr_boost_adam = 1e-5 #[50,1] #5e-3 [20,1]
+    lr_leaf_adam = 1e-1 #8e-3
+    ps_ws_val = 0.1
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
@@ -481,9 +489,13 @@ def main(_):
     data = np.load('/data/data/processed_cifar_resnet.npz')
     x_all = data['x_tra']; y_all = data['y_tra'];
     yp_all = data['yp_tra'];
-
+ 
     x_test = data['x_test']; y_test = data['y_test'];
     yp_test = data['yp_test'];
+
+    # Adding the images themselves as features
+    #x_all = np.hstack((x_all, data['im_train'][:,::5]))
+    #x_test = np.hstack((x_test,data['im_test'][:,::5]))
     
     n_train = x_all.shape[0] 
     all_indices = np.arange(n_train)
@@ -637,6 +649,7 @@ def main(_):
       # helper functions
       save_model = lambda fname : dbg.saver.save(sess, fname)
       save_best = partial(save_model, best_model_path)
+      save_init = partial(save_model, init_model_path)
       pdb.set_trace()
       dbg.saver.restore(sess, init_model_path)
       epoch = -1 ; t = 0; 
