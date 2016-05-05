@@ -76,19 +76,19 @@ if __name__ == "__main__":
     batch_acc = np.zeros(len(d_test))
 
     batch_size = 128
-    images = d_train[0]; labels_train = d_train[1]
+    train_images = d_train[0]; labels_train = d_train[1]
     gap_train = []; probs_train = []
-    for si in range(0, images.shape[0], batch_size):
-        si_end = min(si+batch_size, images.shape[0])
+    for si in range(0, train_images.shape[0], batch_size):
+        si_end = min(si+batch_size, train_images.shape[0])
         gap_train_i, probs_train_i  = sess.run([model.gap, model.probs],
-            feed_dict={model.image:images[si:si_end]})
+            feed_dict={model.image:train_images[si:si_end]})
         gap_train.append(gap_train_i)
         probs_train.append(probs_train_i)
     gap_train = np.vstack(gap_train)
     probs_train = np.vstack(probs_train)
 
-    images = d_test[0]; labels_test = d_test[1]
-    gap_test, probs_test  = sess.run([model.gap, model.probs], feed_dict={model.image:images})
+    test_images = d_test[0]; labels_test = d_test[1]
+    gap_test, probs_test  = sess.run([model.gap, model.probs], feed_dict={model.image:test_images})
     # can also pass in labels with  model.label:labels
     ypred = probs_test.argmax(axis=1)
     print('Overall accuracy: {:3.2f}%'.format(np.sum(ypred==labels_test)/float(len(labels_test))*100.))
@@ -102,9 +102,13 @@ if __name__ == "__main__":
     labels_train = convert_to_one_hot(labels_train)
     labels_test = convert_to_one_hot(labels_test)
 
+    im_train_feature = train_images.reshape((train_images.shape[0], -1))
+    im_test_feature = test_images.reshape((test_images.shape[0], -1))
     np.savez(out_file, 
         x_tra=gap_train, y_tra=labels_train, yp_tra=probs_train, 
-        x_test=gap_test, y_test=labels_test, yp_test=probs_test) 
+        x_test=gap_test, y_test=labels_test, yp_test=probs_test, 
+        im_train=im_train_feature, im_test=im_test_feature
+        ) 
     print('Saved to: {}'.format(out_file))
 
 
