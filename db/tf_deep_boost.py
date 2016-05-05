@@ -239,7 +239,7 @@ class TFBoostNode(object):
       self.y_hats = []
       for i in range(self.n_children+1):
         if i == 0:
-          ps = tf.tile(self.ps_b, tf.pack([batch_size, 1]))
+          ps = tf.tile(tf.zeros([1,self.dim[0]]), tf.pack([batch_size, 1]))
         elif i==1:
           # The first weak learner directly predicts the target and thus is not weighted.
           ps = tf.add(ps, children_preds[i-1])
@@ -279,18 +279,20 @@ class TFBoostNode(object):
       for i in range(self.n_children+1):
         opt = self.opt_type(lr)        
         if i == 0:
-          compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.ps_b])
-          apply_op = opt.apply_gradients(compute_op)
+          #compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.ps_b])
+          #apply_op = opt.apply_gradients(compute_op)
+          compute_op = None
+          apply_op = None
         else:
           compute_op = None
           apply_op = None
-          if i == self.n_children:
-            compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w])
-            apply_op = opt.apply_gradients(compute_op)
+          #if i == self.n_children:
+          #  compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w])
+          #  apply_op = opt.apply_gradients(compute_op)
           if i>1:
             grad_ps = tf.neg(tf.gradients(self.regularized_losses[i], [self.psums[i-1]])[0])
           else:
-            grad_ps = y - self.ps_b
+            grad_ps = y
           self.children_tgts.append(grad_ps)
         if compute_op is not None: # this implies apply op is not None
           compute_ops.append(compute_op)
@@ -412,8 +414,8 @@ class TFDeepBoostGraph(object):
   def training(self):
     return self.train_ops
 
-  def evaluation(self):
-    if self.eval_type == None:
+  def evaluation(self, loss=False):
+    if self.eval_type == None or loss:
       return self.ll_nodes[-1][0].losses[-1]
     return self.eval_type(self.pred, self.y_placeholder)
 
@@ -508,7 +510,7 @@ def main(_):
     x_val = x_all[val_indices]; y_val = y_all[val_indices]
     model_name_suffix = 'cifar10'
     
-    n_nodes = [50, 1]
+    n_nodes = [100, 1]
     n_lvls = len(n_nodes)
     mean_types = [ lambda x : x for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -603,10 +605,11 @@ def main(_):
       t += si_end-si
       if si_end-si < batch_size: t = 0;
       if t % val_interval == 0:
-        preds_tra, avg_loss_tra = sess.run([dbg.inference(), dbg.evaluation()],
-            feed_dict=dbg.fill_feed_dict(x_tra[:5000], y_tra[:5000], 
-                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-        preds, avg_loss = sess.run([dbg.inference(), dbg.evaluation()], 
+        preds_tra, avg_loss_tra, avg_tgt_loss_tra =\
+            sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)],
+                feed_dict=dbg.fill_feed_dict(x_tra[:5000], y_tra[:5000], 
+                                             lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+        preds, avg_loss, avg_tgt_loss = sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)], 
             feed_dict=dbg.fill_feed_dict(x_val, y_val, 
                                          lr_boost, lr_leaf, ps_ws_val, reg_lambda))
         assert(not np.isnan(avg_loss))
@@ -619,7 +622,7 @@ def main(_):
           plt.legend(loc=4)
           plt.draw()
           plt.show(block=False)
-        print 'epoch={},t={} avg_loss={} avg_loss_tra={}'.format(epoch, t, avg_loss, avg_loss_tra)
+        print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
 
         if epoch < min_non_ls_epochs:
             continue
