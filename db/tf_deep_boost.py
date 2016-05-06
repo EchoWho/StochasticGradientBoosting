@@ -49,12 +49,12 @@ def tf_linear(name, l, dim, bias=False):
   with tf.name_scope(name):
     w1 = tf.Variable(
         tf.truncated_normal([dim[0], dim[1]],
-                            stddev=1.0 / sqrt(float(dim[0]))),
+                            stddev=3.0 / sqrt(float(dim[0]))),
         name='weights')
     l1 = tf.matmul(l, w1, name='linear')
     if not bias:
       return l1, [w1]
-    b1 = tf.Variable(tf.zeros([dim[1]]), name='biases')
+    b1 = tf.Variable(tf.truncated_normal([dim[1]], stddev=3.0 / sqrt(float(dim[0]))), name='biases')
     l2 = tf.nn.bias_add(l1, b1)
     return l2, [w1, b1]
 
@@ -184,7 +184,7 @@ class TFBottleneckLeafNode(object):
       else:
         self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
 
-    self.regularized_loss()
+    #self.regularized_loss()
     return self.loss
 
   def regularized_loss(self):
@@ -197,13 +197,13 @@ class TFBottleneckLeafNode(object):
 
   def training(self, y, lr):
     self.optimizer = self.opt_type(lr)
-    compute_op = self.optimizer.compute_gradients(self.regularized_loss, self.variables)
+    compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
     self.apply_op = [self.optimizer.apply_gradients(compute_op)]
     self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
     return self.grads, self.apply_op, []
 
 class TFBoostNode(object):
-  def __init__(self, name, dim, reg_lambda, mean_type, loss_type, opt_type, ps_ws_val, convert_y=True):
+  def __init__(self, name, dim, reg_lambda, mean_type, loss_type, opt_type, ps_ws_val, batch_size, convert_y=True):
     """ record params of the node for construction in the future.
 
     Args:
@@ -220,6 +220,7 @@ class TFBoostNode(object):
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
     self.convert_y = convert_y
     self.ps_ws_val = ps_ws_val
+    self.batch_size = tf.to_float(batch_size)
 
   def inference(self, children_preds, batch_size):
     self.n_children = len(children_preds)
@@ -259,7 +260,7 @@ class TFBoostNode(object):
             for y_hat in self.y_hats ]
       else:
         self.losses = [ tf.reduce_mean(self.loss_type(y_hat, y)) for y_hat in self.y_hats ]
-    self.regularized_loss()
+    #self.regularized_loss()
     return self.losses
 
   def regularized_loss(self):
@@ -290,9 +291,9 @@ class TFBoostNode(object):
           #  compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w])
           #  apply_op = opt.apply_gradients(compute_op)
           if i>1:
-            grad_ps = tf.neg(tf.gradients(self.regularized_losses[i], [self.psums[i-1]])[0])
+            grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0]) * self.batch_size
           else:
-            grad_ps = y
+            grad_ps = y #- self.psums[i-1]
           self.children_tgts.append(grad_ps)
         if compute_op is not None: # this implies apply op is not None
           compute_ops.append(compute_op)
@@ -356,7 +357,7 @@ class TFDeepBoostGraph(object):
         #    opt_types[i], self.ps_ws_val, i<len(n_nodes)-1) for ni in range(n_nodes[i])]  
         l_nodes = [TFBoostNode('boost'+str(ni), dim, self.reg_lambda, 
             mean_types[i], loss_types[i], 
-            opt_types[i], self.ps_ws_val, False) for ni in range(n_nodes[i])]  
+            opt_types[i], self.ps_ws_val, self.batch_size, False) for ni in range(n_nodes[i])]  
 
         assert(n_nodes[i-1] % n_nodes[i] == 0)
         nc = n_nodes[i-1] / n_nodes[i] #n_children
@@ -410,6 +411,9 @@ class TFDeepBoostGraph(object):
 
   def inference(self):
     return self.pred
+
+  def weak_learner_inference(self):
+    return [nd.pred  for nd in self.ll_nodes[-2]]
 
   def training(self):
     return self.train_ops
@@ -510,7 +514,7 @@ def main(_):
     x_val = x_all[val_indices]; y_val = y_all[val_indices]
     model_name_suffix = 'cifar10'
     
-    n_nodes = [100, 1]
+    n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [ lambda x : x for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -561,7 +565,7 @@ def main(_):
   epoch = -1
   max_epoch = np.Inf
   max_epoch_ult = max_epoch * 2 
-  batch_size = 50
+  batch_size = 10
   val_interval = 500
 
   # if line search, these will shrink learning rate until result improves. 
@@ -615,11 +619,21 @@ def main(_):
         assert(not np.isnan(avg_loss))
         # Plotting the fit.
         if dataset == 'arun_1d':
+          weak_predictions = sess.run(dbg.weak_learner_inference(), 
+            feed_dict=dbg.fill_feed_dict(x_val, y_val, 
+                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+          tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts[2:], 
+            feed_dict=dbg.fill_feed_dict(x_val, y_val, 
+                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
           plt.figure(1)
           plt.clf()
           plt.plot(x_val, preds, label='Prediction')
           plt.plot(x_val, y_val, label='Ground Truth')
-          plt.legend(loc=4)
+          for wi, wpreds in enumerate(weak_predictions):
+            plt.plot(x_val, wpreds, label=str(wi))
+          #for wi, tgt in enumerate(tgts):
+          #  plt.plot(x_val, tgt, label=str(wi))
+          #plt.legend(loc=4)
           plt.draw()
           plt.show(block=False)
         print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
