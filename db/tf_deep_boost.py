@@ -54,7 +54,7 @@ def tf_linear(name, l, dim, bias=False):
     l1 = tf.matmul(l, w1, name='linear')
     if not bias:
       return l1, [w1]
-    b1 = tf.Variable(tf.truncated_normal([dim[1]], stddev=3.0 / sqrt(float(dim[0]))), name='biases')
+    b1 = tf.Variable(tf.truncated_normal([dim[1]], stddev=5.0 / sqrt(float(dim[0]))), name='biases')
     l2 = tf.nn.bias_add(l1, b1)
     return l2, [w1, b1]
 
@@ -161,9 +161,9 @@ class TFBottleneckLeafNode(object):
     """
     bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, last_relu=False)
     bn_tf = self.mean_type(bn)
-    #li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
-    self.pred = bn_tf #+ li_tf
-    self.variables = bn_var #+ li_tf_var
+    li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
+    self.pred = bn_tf + li_tf
+    self.variables = bn_var + li_tf_var
     return self.pred
       
   def loss(self, y):
@@ -246,7 +246,7 @@ class TFBoostNode(object):
           ps = tf.add(ps, children_preds[i-1])
         else:
           # if we have a list of ps_val we can have a list of ps_ws #[i-1]))
-          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws_val)) 
+          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws_val / tf.to_float(i-1))) 
         self.psums.append(ps)
         self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
     return self.y_hats[-1]
@@ -292,9 +292,14 @@ class TFBoostNode(object):
           #  apply_op = opt.apply_gradients(compute_op)
           if i>1:
             grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0]) * self.batch_size
+            sum_grads += grad_ps
+            sum_y_hats += self.y_hats[i-1]
           else:
             grad_ps = y #- self.psums[i-1]
-          self.children_tgts.append(grad_ps)
+            sum_grads = y
+            sum_y_hats = self.y_hats[0]
+          tgt = sum_grads - sum_y_hats
+          self.children_tgts.append(tgt)
         if compute_op is not None: # this implies apply op is not None
           compute_ops.append(compute_op)
           self.apply_ops.append(apply_op)
@@ -455,14 +460,14 @@ def main(_):
     mean_types.append(lambda x : x)
     loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(square_loss_eltws)
-    #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
-    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
+    #opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
     # tuned for batch_size = 200, arun 1-d regress
     lr_boost_adam = 1e-5 #[50,1] #5e-3 [20,1]
-    lr_leaf_adam = 1e-1 #8e-3
-    ps_ws_val = 0.1
+    lr_leaf_adam = 1e-7 #8e-3
+    ps_ws_val = 1
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
@@ -627,13 +632,13 @@ def main(_):
                                          lr_boost, lr_leaf, ps_ws_val, reg_lambda))
           plt.figure(1)
           plt.clf()
-          plt.plot(x_val, preds, label='Prediction')
           plt.plot(x_val, y_val, label='Ground Truth')
           for wi, wpreds in enumerate(weak_predictions):
             plt.plot(x_val, wpreds, label=str(wi))
           #for wi, tgt in enumerate(tgts):
           #  plt.plot(x_val, tgt, label=str(wi))
           #plt.legend(loc=4)
+          plt.plot(x_val, preds, lw=3, label='Prediction')
           plt.draw()
           plt.show(block=False)
         print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
