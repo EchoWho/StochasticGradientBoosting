@@ -246,7 +246,7 @@ class TFBoostNode(object):
           ps = tf.add(ps, children_preds[i-1])
         else:
           # if we have a list of ps_val we can have a list of ps_ws #[i-1]))
-          ps = tf.add(ps, tf.mul(children_preds[i-1], self.ps_ws_val / tf.to_float(i-1))) 
+          ps = tf.sub(ps, tf.mul(children_preds[i-1], self.ps_ws_val)) # / tf.to_float(i-1))) 
         self.psums.append(ps)
         self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
     return self.y_hats[-1]
@@ -291,14 +291,15 @@ class TFBoostNode(object):
           #  compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w])
           #  apply_op = opt.apply_gradients(compute_op)
           if i>1:
-            grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0]) * self.batch_size
-            sum_grads += grad_ps
-            sum_y_hats += self.y_hats[i-1]
+            grad_ps = tf.gradients(self.losses[i], [self.psums[i-1]])[0] * self.batch_size
+            #sum_grads += grad_ps
+            #sum_y_hats += self.y_hats[i-1]
           else:
             grad_ps = y #- self.psums[i-1]
-            sum_grads = y
-            sum_y_hats = self.y_hats[0]
-          tgt = sum_grads - sum_y_hats
+            #sum_grads = y
+            #sum_y_hats = self.y_hats[0]
+          #tgt = sum_grads - sum_y_hats
+          tgt = grad_ps
           self.children_tgts.append(tgt)
         if compute_op is not None: # this implies apply op is not None
           compute_ops.append(compute_op)
@@ -393,8 +394,9 @@ class TFDeepBoostGraph(object):
       ll_apply_ops.append(l_apply_ops)
     #endfor
     #flatten all train_ops in one list
+    self.compute_ops = list(itertools.chain.from_iterable(ll_compute_ops)) # dbg.training()
+    self.apply_ops = list(itertools.chain.from_iterable(ll_apply_ops)) # dbg.training()
     self.train_ops = list(itertools.chain.from_iterable(ll_compute_ops + ll_apply_ops)) # dbg.training()
-    #self.train_ops = list(itertools.chain.from_iterable(ll_apply_ops)) # dbg.training()
     # used to create checkpoints of the trained parameters, used for line search
     self.saver = tf.train.Saver()
     self.sigint_capture = False
@@ -418,10 +420,16 @@ class TFDeepBoostGraph(object):
     return self.pred
 
   def weak_learner_inference(self):
-    return [nd.pred  for nd in self.ll_nodes[-2]]
+    return [nd.pred for nd in self.ll_nodes[-2]]
 
   def training(self):
     return self.train_ops
+
+  def compute_ops(self):
+    return self.compute_ops
+
+  def apply_ops(self):
+    return self.apply_ops
 
   def evaluation(self, loss=False):
     if self.eval_type == None or loss:
@@ -454,20 +462,20 @@ def main(_):
     model_name_suffix = '1d_reg'
 
     #n_nodes = [40, 20, 1]
-    n_nodes = [50, 1]
+    n_nodes = [100, 1]
     n_lvls = len(n_nodes)
     mean_types = [ lambda x:x for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(square_loss_eltws)
-    opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
-    #opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    #opt_types =  [ tf.train.GradientDescentOptimizer for lvl in range(n_lvls) ]
+    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
     # tuned for batch_size = 200, arun 1-d regress
     lr_boost_adam = 1e-5 #[50,1] #5e-3 [20,1]
-    lr_leaf_adam = 1e-7 #8e-3
-    ps_ws_val = 1
+    lr_leaf_adam = 1e-2 #8e-3
+    ps_ws_val = 0.1
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
@@ -570,7 +578,7 @@ def main(_):
   epoch = -1
   max_epoch = np.Inf
   max_epoch_ult = max_epoch * 2 
-  batch_size = 10
+  batch_size = 25
   val_interval = 500
 
   # if line search, these will shrink learning rate until result improves. 
@@ -632,13 +640,17 @@ def main(_):
                                          lr_boost, lr_leaf, ps_ws_val, reg_lambda))
           plt.figure(1)
           plt.clf()
-          plt.plot(x_val, y_val, label='Ground Truth')
+          plt.plot(x_val, y_val, lw=3, color='green', label='Ground Truth')
           for wi, wpreds in enumerate(weak_predictions):
-            plt.plot(x_val, wpreds, label=str(wi))
+            if wi==0:
+              # recall the first one learns y directly.
+              plt.plot(x_val, wpreds, label=str(wi))
+            else:
+              plt.plot(x_val, -wpreds, label=str(wi))
           #for wi, tgt in enumerate(tgts):
           #  plt.plot(x_val, tgt, label=str(wi))
           #plt.legend(loc=4)
-          plt.plot(x_val, preds, lw=3, label='Prediction')
+          plt.plot(x_val, preds, lw=3, color='blue', label='Prediction')
           plt.draw()
           plt.show(block=False)
         print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
