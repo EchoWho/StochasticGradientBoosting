@@ -61,7 +61,7 @@ def tf_linear(name, l, dim, bias=False):
 def tf_linear_relu(name, l, dim, bias=False):
   with tf.name_scope(name):
     l1, v1 = tf_linear(name+'li', l, dim, bias)
-    r1 = tf.nn.sigmoid(l1)
+    r1 = tf.sin(l1)
     return r1, v1
 
 def tf_bottleneck(name, l, dim, last_relu=True):
@@ -425,10 +425,10 @@ class TFDeepBoostGraph(object):
   def training(self):
     return self.train_ops
 
-  def compute_ops(self):
+  def training_compututation(self):
     return self.compute_ops
 
-  def apply_ops(self):
+  def training_update(self):
     return self.apply_ops
 
   def evaluation(self, loss=False):
@@ -462,7 +462,7 @@ def main(_):
     model_name_suffix = '1d_reg'
 
     #n_nodes = [40, 20, 1]
-    n_nodes = [100, 1]
+    n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [ lambda x:x for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
@@ -475,7 +475,7 @@ def main(_):
     # tuned for batch_size = 200, arun 1-d regress
     lr_boost_adam = 1e-5 #[50,1] #5e-3 [20,1]
     lr_leaf_adam = 1e-2 #8e-3
-    ps_ws_val = 0.1
+    ps_ws_val = 0.5
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
@@ -615,7 +615,11 @@ def main(_):
       if dbg.sigint_capture == True:
          # don't do any work this iteration, restart all computation with the next
          break
-      sess.run(dbg.training(), 
+      n_applies = len(dbg.training_update())
+      #apply_flag = np.random.random(n_applies) < 1.0/(np.arange(n_applies)+1)**0.2
+      sess.run(dbg.training(),
+            #dbg.training_compututation() 
+            #   + [ op for opi, op in enumerate(dbg.training_update()) if apply_flag[opi]],
             feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda))
       
       # Evaluate
