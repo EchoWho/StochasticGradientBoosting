@@ -58,18 +58,18 @@ def tf_linear(name, l, dim, bias=False):
     l2 = tf.nn.bias_add(l1, b1)
     return l2, [w1, b1]
 
-def tf_linear_relu(name, l, dim, bias=False):
+def tf_linear_transform(name, l, dim, f=lambda x:x, bias=False):
   with tf.name_scope(name):
     l1, v1 = tf_linear(name+'li', l, dim, bias)
-    r1 = tf.sin(l1)
+    r1 = f(l1)
     return r1, v1
 
-def tf_bottleneck(name, l, dim, last_relu=True):
+def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
   with tf.name_scope(name):
-    r1, v1 = tf_linear_relu(name+'lr1', l, [dim[0], dim[1]], bias=True)
+    r1, v1 = tf_linear_transform(name+'lr1', l, [dim[0], dim[1]], f, bias=True)
     l2, v2 = tf_linear(name+'l2', r1, [dim[1], dim[2]], bias=True)
-    if last_relu:
-      r2 = tf.nn.sigmoid(l2)
+    if last_transform:
+      r2 = f(l2)
       return r2, v1+v2
     return l2, v1+v2
 
@@ -159,10 +159,9 @@ class TFBottleneckLeafNode(object):
     Args:
       x: input tensor, float - [batch_size, intermediate_dim, dim[0]]
     """
-    bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, last_relu=False)
-    bn_tf = self.mean_type(bn)
+    bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, self.mean_type, last_transform=False)
     li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
-    self.pred = bn_tf + li_tf
+    self.pred = bn + li_tf
     self.variables = bn_var + li_tf_var
     return self.pred
       
@@ -464,7 +463,7 @@ def main(_):
     #n_nodes = [40, 20, 1]
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
-    mean_types = [ lambda x:x for lvl in range(n_lvls-1) ]
+    mean_types = [ tf.sin for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(square_loss_eltws)
@@ -529,7 +528,7 @@ def main(_):
     
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
-    mean_types = [ lambda x : x for lvl in range(n_lvls-1) ]
+    mean_types = [ tf.sin for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
@@ -546,9 +545,9 @@ def main(_):
 
     #cifar lr
     lr_boost_adam = 1e-3
-    lr_leaf_adam = 1e-3
-    ps_ws_val = 1.0
-    reg_lambda = 1e-4
+    lr_leaf_adam = 1e-2
+    ps_ws_val = 0.5
+    reg_lambda = 0 
 
   input_dim = len(x_val[0].ravel())
   output_dim = len(y_val[0].ravel())
@@ -616,11 +615,8 @@ def main(_):
          # don't do any work this iteration, restart all computation with the next
          break
       n_applies = len(dbg.training_update())
-      #apply_flag = np.random.random(n_applies) < 1.0/(np.arange(n_applies)+1)**0.2
       sess.run(dbg.training(),
-            #dbg.training_compututation() 
-            #   + [ op for opi, op in enumerate(dbg.training_update()) if apply_flag[opi]],
-            feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+          feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda))
       
       # Evaluate
       t += si_end-si
