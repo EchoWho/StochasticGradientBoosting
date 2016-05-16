@@ -15,9 +15,9 @@ Y = X[:,0] % 2
 
 lr = LogisticRegression()
 lr.fit(X, Y)
-Ypred_sklr = lr.predict(X)
+Ypred_sklr = lr.predict_proba(X)
 
-plt.plot(X[:, 0], Ypred_sklr, lw=2, c='red', label='Sklearn.LogisticRegression')
+plt.plot(X[:, 0], Ypred_sklr, lw=2, label='Sklearn.LogisticRegression')
 
 
 import tensorflow as tf
@@ -34,6 +34,13 @@ def tf_linear(name, l, dim, bias=False):
     l2 = tf.nn.bias_add(l1, b1)
     return l2, [w1, b1]
 
+def tf_linear_transform(name, l, dim, f=lambda x:x, bias=False):
+  with tf.name_scope(name):
+    l1, v1 = tf_linear(name+'li', l, dim, bias)
+    r1 = f(l1)
+    return r1, v1
+
+
 def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
   with tf.name_scope(name):
     r1, v1 = tf_linear_transform(name+'lr1', l, [dim[0], dim[1]], f, bias=True)
@@ -46,10 +53,16 @@ def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
 
 X_pl = tf.placeholder(tf.float32, shape=[None,2])
 Y_pl = tf.placeholder(tf.float32, shape=[None,1])
-l,l_var = tf_linear('linear', X_pl, [2,1], True)
-sl = tf.nn.sigmoid(l)
-l2,l2_var = tf_linear('linear2', sl, [1,1], True)
-loss = tf.reduce_mean(tf.squared_difference(Y_pl,l2))
+
+n_btlnck = 2
+for i in range(n_btlnck):
+  bn, bn_var = tf_bottleneck('btlnck0', X_pl, [2,1,1], tf.nn.sigmoid, last_transform=False)
+  if i == 0:
+    pred = bn
+  else:
+    pred += bn
+
+loss = tf.reduce_mean(tf.squared_difference(Y_pl,pred))
 optimizer = tf.train.AdamOptimizer(1e-1)
 training = optimizer.minimize(loss)
 
@@ -65,8 +78,8 @@ for iter in range(200):
     sess.run(training, feed_dict={X_pl : X[indices[i,np.newaxis], :], Y_pl : Y[indices[i],np.newaxis,np.newaxis]})
 
   if iter % 30 == 29:
-    Ypred_tf = sess.run(l2, feed_dict={X_pl : X, Y_pl : Y[:, np.newaxis]})
-    plt.plot(X[:,0], Ypred_tf, lw=2, label=str(iter))
+    Ypred_tf = sess.run(pred, feed_dict={X_pl : X, Y_pl : Y[:, np.newaxis]})
+    plt.plot(X[:,0], Ypred_tf, lw=2, label='Iter#'+str(iter))
     plt.draw()
     print 'Plotting new fit'
     plt.show(block=False)
