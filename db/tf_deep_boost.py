@@ -31,7 +31,8 @@ def sigmoid_clf_mean(x):
   """ Sigmoid GLM mean for classification 
   Rescales sigmoid (probability) output [0,1]->[-1,1]
   """
-  return tf.sub(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.ones_like(x))
+  with tf.name_scope('sigmoid_clf_mean'):
+    return tf.sub(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.ones_like(x))
 
 def logistic_loss_eltws(yp, y):
   """ Element-wise Logistic Loss. """
@@ -46,23 +47,58 @@ def multi_clf_err(yp, y):
   return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
 
 def tf_linear(name, l, dim, bias=False):
+  feature_dim = int(l.get_shape()[-1]) # im_size * im_size
   with tf.name_scope(name):
     w1 = tf.Variable(
-        tf.truncated_normal([dim[0], dim[1]],
-                            stddev=3.0 / sqrt(float(dim[0]))),
+        tf.truncated_normal([feature_dim, dim[1]],
+                            stddev=3.0 / sqrt(float(feature_dim))),
         name='weights')
     l1 = tf.matmul(l, w1, name='linear')
     if not bias:
       return l1, [w1]
-    b1 = tf.Variable(tf.truncated_normal([dim[1]], stddev=5.0 / sqrt(float(dim[0]))), name='biases')
+    b1 = tf.Variable(tf.truncated_normal([dim[1]], stddev=5.0 / sqrt(float(feature_dim))), name='biases')
     l2 = tf.nn.bias_add(l1, b1)
     return l2, [w1, b1]
+
+def tf_conv(name, l, conv_size, stride, bias=False):
+  """
+  Currently assumes 1 channel input SQUARE image (sqrt(len(x)) is assumed to be image size) 
+  :conv_size - [dim_x, dim_y] of the image (TODO: maybe support more channels)
+  :stride - the stride in the image [stride_x, stride_y] for the convolution
+  """
+  feature_dim = int(l.get_shape()[-1]) # im_size * im_size
+  im_size = int(sqrt(feature_dim))
+  assert(im_size * im_size == feature_dim)
+  input_channels = 1 #TODO: Maybe support RGB images
+  output_channels = 1 
+  with tf.name_scope(name):
+    l_image = tf.reshape(l, [-1, im_size, im_size, input_channels])
+    w1 = tf.Variable(
+        tf.truncated_normal([conv_size[0], conv_size[1], input_channels, output_channels],
+                            stddev=3.0 / sqrt(float(conv_size[0]))),
+        name='weights')
+    l1 = tf.nn.conv2d(l_image, w1, strides=[1, stride[0], stride[1], 1], padding='SAME', name='conv')
+    if not bias:
+      return l1, [w1]
+    b1 = tf.Variable(tf.truncated_normal([output_channels], stddev=5.0 /
+        sqrt(float(output_channels))), name='biases')
+    l2 = l1 + b1
+    l2_vec = tf.reshape(l2, [-1, feature_dim/(stride[0]*stride[1])*output_channels])
+    return l2_vec, [w1, b1]
 
 def tf_linear_transform(name, l, dim, f=lambda x:x, bias=False):
   with tf.name_scope(name):
     l1, v1 = tf_linear(name+'li', l, dim, bias)
     r1 = f(l1)
     return r1, v1
+
+def tf_conv_transform(name, l, dim, conv_size, stride, f=lambda x:x, bias=False):
+  with tf.name_scope(name):
+    c1, vc1 = tf_conv(name+'ci', l, conv_size, stride, bias)
+    #c2, vc2 = tf_conv(name+'c2i', tf.nn.relu(c1), np.array(conv_size)/2, stride, bias)
+    l1, vl1 = tf_linear(name+'li', tf.nn.relu(c1), (None,dim[1]), bias)
+    r1 = f(l1)
+    return r1, vl1+vc1
 
 def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
   with tf.name_scope(name):
@@ -92,15 +128,26 @@ class TFLeafNode(object):
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
     self.convert_y = convert_y
 
-  def inference(self, x):
+  def inference(self, x, weak_learner_params):
     """ Construct inference part of the node. 
       
     Args:
       x: input tensor, float - [batch_size, dim[0]]
     """
     # linear transformation
+    if weak_learner_params is None:
+      learner_type = 'linear'
+    else:
+      learner_type = weak_learner_params['type']
     with tf.name_scope(self.name):
-      self.pred, self.variables = tf_linear_transform(self.name, x, self.dim, self.mean_type, True) 
+      if learner_type == 'linear':
+        self.pred, self.variables = tf_linear_transform(self.name, x, self.dim, self.mean_type, True) 
+      elif learner_type == 'conv':
+        conv_size = weak_learner_params['conv_size']
+        stride = weak_learner_params['stride']
+        self.pred, self.variables = tf_conv_transform(self.name, x, self.dim, conv_size, stride, self.mean_type, True) 
+      else:
+        raise Exception("Unrecognized weak_learner_params['type'] == {}".format(learner_type))
     return self.pred
       
   def loss(self, y):
@@ -109,7 +156,7 @@ class TFLeafNode(object):
     Args:
       y: target (sign and magnitude on each dim), float - [batch_size, dim[1]] 
     """
-    with tf.name_scope(self.name):
+    with tf.name_scope(self.name + '_loss'):
       if self.convert_y:
         y_sgn = tf.sign(y, name='y_sgn') # target of dim
         y_abs = tf.abs(y, name='y_abs')  # wgt of each dim 
@@ -123,11 +170,12 @@ class TFLeafNode(object):
     return self.loss
 
   def training(self, y, lr):
-    self.optimizer = self.opt_type(lr)
-    compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
-    self.apply_op = [self.optimizer.apply_gradients(compute_op)]
-    self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
-    return self.grads, self.apply_op, []
+    with tf.name_scope(self.name + '_training'):
+      self.optimizer = self.opt_type(lr)
+      compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
+      self.apply_op = [self.optimizer.apply_gradients(compute_op)]
+      self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
+      return self.grads, self.apply_op, []
 
 class TFBottleneckLeafNode(object):
   """ Apply a bottleneck (resnet) that outputs K dimensions. 
@@ -182,7 +230,7 @@ class TFBottleneckLeafNode(object):
     return self.loss
 
   def regularized_loss(self):
-    with tf.name_scope(self.name):
+    with tf.name_scope(self.name + '_loss'):
       regulation = 0.0
       for variable in self.variables:
         regulation += self.reg_lambda * tf.reduce_sum(tf.square(tf.reshape(variable,[-1])))
@@ -190,11 +238,12 @@ class TFBottleneckLeafNode(object):
     return self.regularized_loss
 
   def training(self, y, lr):
-    self.optimizer = self.opt_type(lr)
-    compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
-    self.apply_op = [self.optimizer.apply_gradients(compute_op)]
-    self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
-    return self.grads, self.apply_op, []
+    with tf.name_scope(self.name + '_training'):
+      self.optimizer = self.opt_type(lr)
+      compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
+      self.apply_op = [self.optimizer.apply_gradients(compute_op)]
+      self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
+      return self.grads, self.apply_op, []
 
 class TFBoostNode(object):
   def __init__(self, name, dim, reg_lambda, mean_type, loss_type, opt_type, ps_ws_val, batch_size, convert_y, is_root=True):
@@ -233,17 +282,17 @@ class TFBoostNode(object):
       for i in range(self.n_children+1):
         if i == 0:
           ps = tf.tile(self.ps_b, tf.pack([batch_size, 1]))
-        elif i==1:
+        #elif i==1:
           # The first weak learner directly predicts the target and thus is not weighted.
-          ps = ps + children_preds[i-1] * self.ps_ws[i-1]
+        #  ps = ps + children_preds[i-1] * self.ps_ws[i-1]
         else:
-          ps = ps - children_preds[i-1] * self.ps_ws[i-1] * self.ps_ws_val # / tf.to_float(i-1))) 
+          ps = ps - children_preds[i-1] * self.ps_ws[i-1] * self.ps_ws_val  #/ tf.to_float(sqrt(float(i+1)))
         self.psums.append(ps)
         self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
     return self.y_hats[-1]
 
   def loss(self, y):
-    with tf.name_scope(self.name):
+    with tf.name_scope(self.name+'_loss'):
       if self.convert_y and not self.is_root:
         y_sgn = tf.sign(y, name='y_sgn')
         y_abs = tf.abs(y, name='y_abs')
@@ -262,7 +311,7 @@ class TFBoostNode(object):
     return self.regularized_losses
       
   def training(self, y, lr):
-    with tf.name_scope(self.name):
+    with tf.name_scope(self.name+'_training'):
       # optimizer (n_children) is for bias
       compute_ops = []
       self.apply_ops = []
@@ -289,8 +338,8 @@ class TFBoostNode(object):
         # Compute children targets (gradients w.r.t. previous partial sum) 
         if i == 0:
           continue
-        elif i==1:
-          grad_ps = y #- self.psums[i-1]
+        #elif i==1:
+        #  grad_ps = y #- self.psums[i-1]
           #sum_grads = y
           #sum_y_hats = self.y_hats[0]
         else:
@@ -323,7 +372,7 @@ class TFBoostNode(object):
     return self.grads, self.apply_ops, self.children_tgts
 
 class TFDeepBoostGraph(object):
-  def __init__(self, dims, n_nodes, weak_classification, mean_types, loss_types, opt_types, eval_type=None):
+  def __init__(self, dims, n_nodes, weak_classification, mean_types, loss_types, opt_types, weak_learner_params=None, eval_type=None):
     """
     : weak_classification - bool - If True the weak learners are weighted classifications to 
         fit their targets (parent gradients w.r.t. previous partial sum). This implies the 
@@ -359,7 +408,7 @@ class TFDeepBoostGraph(object):
         l_nodes = [TFLeafNode('leaf'+str(ni), dim, self.reg_lambda, 
             mean_types[i], loss_types[i], 
             opt_types[i], self.weak_classification) for ni in range(n_nodes[i])]  
-        l_preds = map(lambda node : node.inference(self.x_placeholder), l_nodes)
+        l_preds = map(lambda node : node.inference(self.x_placeholder, weak_learner_params), l_nodes)
       else:
         dim_index_end = dim_index+2
         dim = dims[dim_index:dim_index_end]; dim_index = dim_index_end-1
@@ -375,6 +424,7 @@ class TFDeepBoostGraph(object):
         nc = n_nodes[i-1] / n_nodes[i] #n_children
         l_preds = map(lambda i : l_nodes[i].inference(l_preds[i*nc:(i+1)*nc], self.batch_size), 
             range(n_nodes[i]))
+      #endif
       self.ll_nodes.append(l_nodes)
     #endfor
     self.pred = l_preds[0] # dbg.inference()
@@ -478,6 +528,8 @@ def main(_):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
+    weak_learner_params = {'type':'linear'}
+
     lr_boost_adam = 1e-3 
     lr_leaf_adam = 1e-2 
     ps_ws_val = 1.0
@@ -494,18 +546,28 @@ def main(_):
     y_val = mnist.validation.labels
     model_name_suffix = 'mnist'
 
-    n_nodes = [80, 1]
+    n_nodes = [32, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
+
+    #lr = tf.train.exponential_decay( 
+    #    learning_rate=1e-3, 
+    #    global_step=tp.get_global_step_var(), 
+    #    decay_steps=dataset_train.size() * 10, 
+    #    decay_rate=0.3, staircase=True, name='learning_rate') 
+
+
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
+
+    weak_learner_params = {'type':'conv', 'conv_size':[5,5], 'stride':[2,2]}
     
     #mnist lr
-    lr_boost_adam = 3e-3
-    lr_leaf_adam = 3e-3
+    lr_boost_adam = 1e-8
+    lr_leaf_adam = 1e-3
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
@@ -549,6 +611,8 @@ def main(_):
 
     train_set = list(range(x_tra.shape[0]))
 
+    weak_learner_params = {'type':'linear'}
+
     #cifar lr
     lr_boost_adam = 1e-3
     lr_leaf_adam = 1e-2
@@ -560,7 +624,7 @@ def main(_):
 
   dims = [output_dim for _ in xrange(n_lvls+2)] 
   dims[0] = input_dim
-  dims[1] = input_dim # TODO do it in better style
+  #dims[1] = input_dim # TODO do it in better style
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
@@ -568,7 +632,8 @@ def main(_):
 
   # modify the default tensorflow graph.
   weak_classification = True
-  dbg = TFDeepBoostGraph(dims, n_nodes, weak_classification, mean_types, loss_types, opt_types, eval_type)
+  dbg = TFDeepBoostGraph(dims, n_nodes, weak_classification, mean_types, loss_types, opt_types,
+          weak_learner_params, eval_type)
 
   init = tf.initialize_all_variables()
   sess = tf.Session()
@@ -584,7 +649,7 @@ def main(_):
   epoch = -1
   max_epoch = np.Inf
   max_epoch_ult = max_epoch * 2 
-  batch_size = 25
+  batch_size = 64
   val_interval = 500
 
   # if line search, these will shrink learning rate until result improves. 
@@ -607,7 +672,13 @@ def main(_):
   init_model_path = os.path.join(model_dir, init_model_fname)
   dbg.saver.save(sess, init_model_path)
 
+  tf.train.SummaryWriter(logdir='../log/',graph=tf.get_default_graph())
+
   stop_program = False
+  lr_gamma = 0.3 
+  lr_decay_step = x_tra.shape[0] * 10.0
+  global_step = 0
+
   while not stop_program and epoch < max_epoch and epoch < max_epoch_ult:
     epoch += 1
     print("-----Epoch {:d}-----".format(epoch))
@@ -628,6 +699,14 @@ def main(_):
       # Evaluate
       t += si_end-si
       if si_end-si < batch_size: t = 0;
+      global_step += si_end - si
+      if global_step > lr_decay_step: 
+        global_step -= lr_decay_step 
+        lr_boost *= lr_gamma
+        lr_leaf *= lr_gamma
+        print("----------------------")
+        print('Decayed step size: lr_boost={:.3g}, lr_leaf={:.3g}'.format(lr_boost, lr_leaf))
+        print("----------------------")
       if t % val_interval == 0:
         preds_tra, avg_loss_tra, avg_tgt_loss_tra =\
             sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)],
