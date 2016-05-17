@@ -36,8 +36,13 @@ def sigmoid_clf_mean(x):
     return tf.sub(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.ones_like(x))
 
 def logistic_loss_eltws(yp, y):
-  """ Element-wise Logistic Loss. """
+  """ Element-wise Logistic Loss. Assumes {-1, 1} targets"""
   return tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, y))), tf.ones_like(y)))
+
+def logistic_loss_eltws_masked(yp, y):
+  """ Element-wise Logistic Loss, masked by the value of y. Assumes {-1,1} targets with 0s meaning
+    values to be masked """
+  return tf.mul(tf.abs(y), tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, y))), tf.ones_like(y))))
 
 def square_loss_eltws(yp, y):
   """ Element-wise Square Loss. """
@@ -46,6 +51,12 @@ def square_loss_eltws(yp, y):
 def multi_clf_err(yp, y):
   """ Multi-class classification Error """
   return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
+
+def multi_clf_err_masked(yp, y):
+  """ yp \in [-1, 1], y \in {-1,1} """
+  yp_signed = 2.0*tf.to_float(tf.greater_equal(yp, 0)) - 1.0
+  eltws_correct = tf.mul(tf.abs(y), tf.to_float(tf.equal(yp_signed, y)))
+  return tf.reduce_mean(tf.reduce_sum(eltws_correct, 1))
 
 def tf_linear(name, l, dim, bias=False):
   feature_dim = int(l.get_shape()[-1]) # im_size * im_size
@@ -455,9 +466,9 @@ class TFDeepBoostGraph(object):
     self.apply_ops = list(itertools.chain.from_iterable(ll_apply_ops)) # dbg.training()
     self.train_ops = list(itertools.chain.from_iterable(ll_compute_ops + ll_apply_ops)) # dbg.training()
     # used to create checkpoints of the trained parameters, used for line search
-    self.saver = tf.train.Saver()
     self.sigint_capture = False
     signal.signal(signal.SIGINT, self.signal_handler)
+    self.saver = tf.train.Saver()
     print 'done.'
   #end __init__
 
@@ -498,8 +509,8 @@ class TFDeepBoostGraph(object):
     self.sigint_capture = True
 
 def main(_):
-  # ------------- Dataset -------------
   from textmenu import textmenu
+  # ------------- Dataset -------------
   datasets = get_dataset.all_names()
   indx = textmenu(datasets)
   if indx == None:
@@ -544,6 +555,23 @@ def main(_):
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
+  elif dataset == 'grasp_hog':
+    n_nodes = [32, 1]
+    n_lvls = len(n_nodes)
+    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
+    mean_types.append(lambda x : x)
+    loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
+    loss_types.append(logistic_loss_eltws_masked)
+
+    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    eval_type = multi_clf_err_masked
+    weak_learner_params = {'type':'linear'}
+
+    lr_boost_adam = 1e-3 
+    lr_leaf_adam = 1e-2 
+    ps_ws_val = 1.0
+    reg_lambda = 0.0
+
   elif dataset == 'cifar':
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
@@ -569,6 +597,8 @@ def main(_):
     lr_leaf_adam = 1e-2
     ps_ws_val = 0.5
     reg_lambda = 0 
+  else:
+    raise Exception('Did not recognize datset: {}'.format(dataset))
 
   train_set = list(range(x_tra.shape[0]))
 
@@ -589,6 +619,7 @@ def main(_):
           weak_learner_params, eval_type)
 
   init = tf.initialize_all_variables()
+  #sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
   sess = tf.Session()
   print 'Initializing...'
   sess.run(init)
