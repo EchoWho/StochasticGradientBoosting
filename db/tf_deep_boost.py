@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from math import ceil, floor, sqrt, cos, sin
 import os,signal
 from timer import Timer
+import get_dataset 
 
 import ipdb as pdb
 
@@ -499,25 +500,14 @@ class TFDeepBoostGraph(object):
 def main(_):
   # ------------- Dataset -------------
   from textmenu import textmenu
-  datasets = ['arun_1d', 'mnist', 'cifar']
+  datasets = get_dataset.all_names()
   indx = textmenu(datasets)
   if indx == None:
       return
   dataset = datasets[indx]
+  x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
+  model_name_suffix = dataset
   if dataset == 'arun_1d':
-    f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
-    data_set_size = 200000
-    all_data = [pt for pt in dataset_1d(data_set_size, f, 9122)]
-    train_set = list(range(data_set_size))
-    val_set = [pt for pt in dataset_1d(201, f)]
-    val_set = sorted(val_set, key = lambda x: x.x)
-    x_tra = np.expand_dims(np.hstack([ pt.x for pt in all_data]), 1)
-    y_tra = np.expand_dims(np.hstack([ pt.y for pt in all_data]), 1)
-    x_val = np.expand_dims(np.hstack([ pt.x for pt in val_set]), 1)
-    y_val = np.expand_dims(np.hstack([ pt.y for pt in val_set]), 1)
-    model_name_suffix = '1d_reg'
-
-    #n_nodes = [40, 20, 1]
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [tf.sin for lvl in range(n_lvls-1) ]
@@ -536,29 +526,12 @@ def main(_):
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
-    from tensorflow.examples.tutorials.mnist import input_data
-    mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
-
-    train_set = list(range(mnist.train.num_examples))
-    x_tra = mnist.train.images
-    y_tra = mnist.train.labels
-    x_val = mnist.validation.images # validation
-    y_val = mnist.validation.labels
-    model_name_suffix = 'mnist'
-
     n_nodes = [32, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
-
-    #lr = tf.train.exponential_decay( 
-    #    learning_rate=1e-3, 
-    #    global_step=tp.get_global_step_var(), 
-    #    decay_steps=dataset_train.size() * 10, 
-    #    decay_rate=0.3, staircase=True, name='learning_rate') 
-
 
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
@@ -572,28 +545,6 @@ def main(_):
     reg_lambda = 0.0
 
   elif dataset == 'cifar':
-    data = np.load('/data/data/processed_cifar_resnet.npz')
-    x_all = data['x_tra']; y_all = data['y_tra'];
-    yp_all = data['yp_tra'];
- 
-    x_test = data['x_test']; y_test = data['y_test'];
-    yp_test = data['yp_test'];
-
-    # Adding the images themselves as features
-    #x_all = np.hstack((x_all, data['im_train'][:,::5]))
-    #x_test = np.hstack((x_test,data['im_test'][:,::5]))
-    
-    n_train = x_all.shape[0] 
-    all_indices = np.arange(n_train)
-    np.random.shuffle(all_indices)
-    tra_val_split = 45000 #n_train * 9 // 10
-    tra_indices = all_indices[:tra_val_split]
-    val_indices = all_indices[tra_val_split:]
-
-    x_tra = x_all[tra_indices]; y_tra = y_all[tra_indices] 
-    x_val = x_all[val_indices]; y_val = y_all[val_indices]
-    model_name_suffix = 'cifar10'
-    
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [ tf.sin for lvl in range(n_lvls-1) ]
@@ -618,6 +569,8 @@ def main(_):
     lr_leaf_adam = 1e-2
     ps_ws_val = 0.5
     reg_lambda = 0 
+
+  train_set = list(range(x_tra.shape[0]))
 
   input_dim = len(x_val[0].ravel())
   output_dim = len(y_val[0].ravel())
