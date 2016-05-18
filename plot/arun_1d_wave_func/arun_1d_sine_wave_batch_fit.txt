@@ -1,0 +1,571 @@
+-----Epoch 1-----
+epoch=1,t=240000 
+avg_loss=1313.67175293 avg_tgt_loss=0.0301247537136 
+loss_tra=1299.71154785 tgt_loss_tra=0.0304821804166
+epoch=1,t=280000 
+avg_loss=1311.71350098 avg_tgt_loss=0.018494065851 
+loss_tra=1298.03125 tgt_loss_tra=0.0193528141826
+epoch=1,t=320000 
+avg_loss=1311.11108398 avg_tgt_loss=0.0175618827343 
+loss_tra=1297.5090332 tgt_loss_tra=0.0185750946403
+epoch=1,t=360000 
+avg_loss=1310.88049316 avg_tgt_loss=0.0174804143608 
+loss_tra=1297.29345703 tgt_loss_tra=0.0185418762267
+epoch=1,t=400000 
+avg_loss=1310.78857422 avg_tgt_loss=0.017461143434 
+loss_tra=1297.20361328 tgt_loss_tra=0.0185389406979
+-----Epoch 2-----
+epoch=2,t=440000 
+avg_loss=1310.87390137 avg_tgt_loss=0.0174799244851 
+loss_tra=1297.28588867 tgt_loss_tra=0.0185417793691
+epoch=2,t=480000 
+avg_loss=1310.95605469 avg_tgt_loss=0.0174974128604 
+loss_tra=1297.37145996 tgt_loss_tra=0.01854775846
+epoch=2,t=520000 
+avg_loss=1310.99414062 avg_tgt_loss=0.0175074115396 
+loss_tra=1297.4095459 tgt_loss_tra=0.0185516662896
+epoch=2,t=560000 
+avg_loss=1310.9432373 avg_tgt_loss=0.0174942407757 
+loss_tra=1297.35913086 tgt_loss_tra=0.0185471214354
+epoch=2,t=600000 
+avg_loss=1311.06347656 avg_tgt_loss=0.0175280962139 
+loss_tra=1297.47827148 tgt_loss_tra=0.0185593105853
+-----Epoch 3-----
+epoch=3,t=640000 
+avg_loss=1311.13903809 avg_tgt_loss=0.0175580941141 
+loss_tra=1297.55236816 tgt_loss_tra=0.0185678489506
+epoch=3,t=680000 
+avg_loss=1311.13317871 avg_tgt_loss=0.0175928641111 
+loss_tra=1297.53063965 tgt_loss_tra=0.0185403320938
+epoch=3,t=720000 
+avg_loss=1310.99108887 avg_tgt_loss=0.0175343099982 
+loss_tra=1297.40148926 tgt_loss_tra=0.018540404737
+epoch=3,t=760000 
+avg_loss=1310.88269043 avg_tgt_loss=0.0175650734454 
+loss_tra=1297.26757812 tgt_loss_tra=0.0184970088303
+epoch=3,t=800000 
+avg_loss=1311.44311523 avg_tgt_loss=0.0177176315337 
+loss_tra=1297.84472656 tgt_loss_tra=0.0186207816005
+-----Epoch 4-----
+epoch=4,t=840000 
+avg_loss=1310.91601562 avg_tgt_loss=0.0175397656858 
+loss_tra=1297.30847168 tgt_loss_tra=0.0185122676194
+epoch=4,t=880000 
+avg_loss=1311.16455078 avg_tgt_loss=0.0176007449627 
+loss_tra=1297.55432129 tgt_loss_tra=0.0185467954725
+epoch=4,t=920000 
+avg_loss=1311.18664551 avg_tgt_loss=0.0176147371531 
+loss_tra=1297.5925293 tgt_loss_tra=0.0185655839741
+epoch=4,t=960000 
+avg_loss=1310.78417969 avg_tgt_loss=0.0174796096981 
+loss_tra=1297.20251465 tgt_loss_tra=0.0185368116945
+epoch=4,t=1000000 
+avg_loss=1310.62280273 avg_tgt_loss=0.0174874849617 
+loss_tra=1297.02709961 tgt_loss_tra=0.0185142923146
+-----Epoch 5-----
+epoch=5,t=1040000 
+avg_loss=1310.77697754 avg_tgt_loss=0.0174788422883 
+loss_tra=1297.19055176 tgt_loss_tra=0.018528861925
+epoch=5,t=1080000 
+avg_loss=1310.81835938 avg_tgt_loss=0.0175041258335 
+loss_tra=1297.23742676 tgt_loss_tra=0.0185436308384
+epoch=5,t=1120000 
+avg_loss=1310.89099121 avg_tgt_loss=0.0175839997828 
+loss_tra=1297.27099609 tgt_loss_tra=0.0184921696782
+epoch=5,t=1160000 
+avg_loss=1311.17358398 avg_tgt_loss=0.0176526736468 
+loss_tra=1297.55529785 tgt_loss_tra=0.0185262337327
+epoch=5,t=1200000 
+avg_loss=1310.95214844 avg_tgt_loss=0.0175617765635 
+loss_tra=1297.35827637 tgt_loss_tra=0.0185334626585
+---------------------
+Weak learner: 46
+-----Epoch 0-----
+epoch=0,t=40000 
+avg_loss=1241.86157227 avg_tgt_loss=30.2234268188 
+loss_tra=1218.62011719 tgt_loss_tra=31.3596401215
+epoch=0,t=80000 
+avg_loss=1184.62243652 avg_tgt_loss=20.7334537506 
+loss_tra=1161.02209473 tgt_loss_tra=21.4353866577
+epoch=0,t=120000 
+avg_loss=1137.57897949 avg_tgt_loss=14.0939922333 
+loss_tra=1114.1315918 tgt_loss_tra=14.5230808258
+epoch=0,t=160000 
+avg_loss=1102.94213867 avg_tgt_loss=9.55417251587 
+loss_tra=1078.6809082 tgt_loss_tra=9.80512714386
+epoch=0,t=200000 
+avg_loss=1079.49133301 avg_tgt_loss=6.48820304871 
+loss_tra=1054.09033203 tgt_loss_tra=6.64580535889
+-----Epoch 1-----
+epoch=1,t=240000 
+avg_loss=1064.79589844 avg_tgt_loss=4.44240140915 
+loss_tra=1038.48803711 tgt_loss_tra=4.54177570343
+epoch=1,t=280000 
+avg_loss=1061.57080078 avg_tgt_loss=3.03975105286 
+loss_tra=1034.60681152 tgt_loss_tra=3.1070125103
+epoch=1,t=320000 
+avg_loss=1063.88757324 avg_tgt_loss=2.01738190651 
+loss_tra=1036.33203125 tgt_loss_tra=2.06086182594
+epoch=1,t=360000 
+avg_loss=1070.68481445 avg_tgt_loss=1.25851905346 
+loss_tra=1042.6192627 tgt_loss_tra=1.28637897968
+epoch=1,t=400000 
+avg_loss=1078.99304199 avg_tgt_loss=0.718794941902 
+loss_tra=1050.41638184 tgt_loss_tra=0.736610293388
+-----Epoch 2-----
+epoch=2,t=440000 
+avg_loss=1086.1105957 avg_tgt_loss=0.366890400648 
+loss_tra=1057.07714844 tgt_loss_tra=0.377388715744
+epoch=2,t=480000 
+avg_loss=1092.27062988 avg_tgt_loss=0.163151398301 
+loss_tra=1062.91845703 tgt_loss_tra=0.168689504266
+epoch=2,t=520000 
+avg_loss=1097.56994629 avg_tgt_loss=0.0643291771412 
+loss_tra=1067.95471191 tgt_loss_tra=0.0672494322062
+epoch=2,t=560000 
+avg_loss=1101.17700195 avg_tgt_loss=0.0279199331999 
+loss_tra=1071.36523438 tgt_loss_tra=0.0296035073698
+epoch=2,t=600000 
+avg_loss=1103.2010498 avg_tgt_loss=0.0188746452332 
+loss_tra=1073.27160645 tgt_loss_tra=0.0200559832156
+-----Epoch 3-----
+epoch=3,t=640000 
+avg_loss=1104.04663086 avg_tgt_loss=0.0176108069718 
+loss_tra=1074.07788086 tgt_loss_tra=0.0186319760978
+epoch=3,t=680000 
+avg_loss=1104.41784668 avg_tgt_loss=0.0175751019269 
+loss_tra=1074.4375 tgt_loss_tra=0.018531544134
+epoch=3,t=720000 
+avg_loss=1104.32312012 avg_tgt_loss=0.0175460986793 
+loss_tra=1074.33361816 tgt_loss_tra=0.0185150355101
+epoch=3,t=760000 
+avg_loss=1104.25170898 avg_tgt_loss=0.0175275802612 
+loss_tra=1074.25561523 tgt_loss_tra=0.018507534638
+epoch=3,t=800000 
+avg_loss=1104.4765625 avg_tgt_loss=0.0175857916474 
+loss_tra=1074.48779297 tgt_loss_tra=0.0185262430459
+-----Epoch 4-----
+epoch=4,t=840000 
+avg_loss=1104.51428223 avg_tgt_loss=0.0175950936973 
+loss_tra=1074.53637695 tgt_loss_tra=0.0185370910913
+epoch=4,t=880000 
+avg_loss=1104.45385742 avg_tgt_loss=0.0175812318921 
+loss_tra=1074.48095703 tgt_loss_tra=0.0185370687395
+epoch=4,t=920000 
+avg_loss=1104.29589844 avg_tgt_loss=0.0175279304385 
+loss_tra=1074.31835938 tgt_loss_tra=0.0185110066086
+epoch=4,t=960000 
+avg_loss=1104.22167969 avg_tgt_loss=0.0175102446228 
+loss_tra=1074.2565918 tgt_loss_tra=0.0185164939612
+epoch=4,t=1000000 
+avg_loss=1104.42333984 avg_tgt_loss=0.0175664126873 
+loss_tra=1074.41113281 tgt_loss_tra=0.0184932965785
+-----Epoch 5-----
+epoch=5,t=1040000 
+avg_loss=1104.72033691 avg_tgt_loss=0.0176710169762 
+loss_tra=1074.71252441 tgt_loss_tra=0.0185373462737
+epoch=5,t=1080000 
+avg_loss=1104.51916504 avg_tgt_loss=0.0175536461174 
+loss_tra=1074.48925781 tgt_loss_tra=0.0184214599431
+epoch=5,t=1120000 
+avg_loss=1104.51171875 avg_tgt_loss=0.0172501802444 
+loss_tra=1074.45056152 tgt_loss_tra=0.0180549174547
+epoch=5,t=1160000 
+avg_loss=1104.41430664 avg_tgt_loss=0.0165240131319 
+loss_tra=1074.44213867 tgt_loss_tra=0.0175652466714
+epoch=5,t=1200000 
+avg_loss=1104.26623535 avg_tgt_loss=0.0164127796888 
+loss_tra=1074.33093262 tgt_loss_tra=0.0175587739795
+---------------------
+Weak learner: 47
+-----Epoch 0-----
+epoch=0,t=40000 
+avg_loss=988.502380371 avg_tgt_loss=61.0417022705 
+loss_tra=960.839660645 tgt_loss_tra=57.9255943298
+epoch=0,t=80000 
+avg_loss=908.889160156 avg_tgt_loss=38.8730888367 
+loss_tra=885.720581055 tgt_loss_tra=36.85389328
+epoch=0,t=120000 
+avg_loss=840.688110352 avg_tgt_loss=23.5273571014 
+loss_tra=821.835266113 tgt_loss_tra=22.3183460236
+epoch=0,t=160000 
+avg_loss=779.505859375 avg_tgt_loss=13.4211168289 
+loss_tra=763.826782227 tgt_loss_tra=12.7497062683
+epoch=0,t=200000 
+avg_loss=726.439697266 avg_tgt_loss=7.00862026215 
+loss_tra=713.024841309 tgt_loss_tra=6.66742515564
+-----Epoch 1-----
+epoch=1,t=240000 
+avg_loss=683.539428711 avg_tgt_loss=3.27722668648 
+loss_tra=671.823059082 tgt_loss_tra=3.12571382523
+epoch=1,t=280000 
+avg_loss=652.267028809 avg_tgt_loss=1.34511399269 
+loss_tra=641.901123047 tgt_loss_tra=1.28962695599
+epoch=1,t=320000 
+avg_loss=631.962768555 avg_tgt_loss=0.470630139112 
+loss_tra=622.642578125 tgt_loss_tra=0.454721778631
+epoch=1,t=360000 
+avg_loss=620.390258789 avg_tgt_loss=0.136269256473 
+loss_tra=611.819335938 tgt_loss_tra=0.133100807667
+epoch=1,t=400000 
+avg_loss=615.021240234 avg_tgt_loss=0.0382071249187 
+loss_tra=606.915405273 tgt_loss_tra=0.0381891652942
+-----Epoch 2-----
+epoch=2,t=440000 
+avg_loss=612.903808594 avg_tgt_loss=0.0187402162701 
+loss_tra=605.031616211 tgt_loss_tra=0.0195598490536
+epoch=2,t=480000 
+avg_loss=612.242919922 avg_tgt_loss=0.0165842939168 
+loss_tra=604.454223633 tgt_loss_tra=0.0176482256502
+epoch=2,t=520000 
+avg_loss=612.083190918 avg_tgt_loss=0.0164405982941 
+loss_tra=604.314697266 tgt_loss_tra=0.0175633076578
+epoch=2,t=560000 
+avg_loss=612.064575195 avg_tgt_loss=0.0164334475994 
+loss_tra=604.29888916 tgt_loss_tra=0.0175635758787
+epoch=2,t=600000 
+avg_loss=612.067260742 avg_tgt_loss=0.0164353996515 
+loss_tra=604.299072266 tgt_loss_tra=0.0175620336086
+-----Epoch 3-----
+epoch=3,t=640000 
+avg_loss=612.102600098 avg_tgt_loss=0.0164466705173 
+loss_tra=604.334289551 tgt_loss_tra=0.0175653286278
+epoch=3,t=680000 
+avg_loss=611.981994629 avg_tgt_loss=0.0164103340358 
+loss_tra=604.217163086 tgt_loss_tra=0.0175593290478
+epoch=3,t=720000 
+avg_loss=612.1640625 avg_tgt_loss=0.016487326473 
+loss_tra=604.387695312 tgt_loss_tra=0.0175524298102
+epoch=3,t=760000 
+avg_loss=612.042663574 avg_tgt_loss=0.0164653994143 
+loss_tra=604.270385742 tgt_loss_tra=0.0175362881273
+epoch=3,t=800000 
+avg_loss=612.038391113 avg_tgt_loss=0.0164769478142 
+loss_tra=604.257263184 tgt_loss_tra=0.017513519153
+-----Epoch 4-----
+epoch=4,t=840000 
+avg_loss=612.097900391 avg_tgt_loss=0.0165424216539 
+loss_tra=604.299072266 tgt_loss_tra=0.0174900665879
+epoch=4,t=880000 
+avg_loss=612.066040039 avg_tgt_loss=0.0165181681514 
+loss_tra=604.271911621 tgt_loss_tra=0.0174933001399
+epoch=4,t=920000 
+avg_loss=611.905578613 avg_tgt_loss=0.0164441708475 
+loss_tra=604.123168945 tgt_loss_tra=0.0175158977509
+epoch=4,t=960000 
+avg_loss=612.275634766 avg_tgt_loss=0.0165676753968 
+loss_tra=604.491760254 tgt_loss_tra=0.0175503436476
+epoch=4,t=1000000 
+avg_loss=612.274291992 avg_tgt_loss=0.0166090764105 
+loss_tra=604.481323242 tgt_loss_tra=0.0175278447568
+-----Epoch 5-----
+epoch=5,t=1040000 
+avg_loss=612.124755859 avg_tgt_loss=0.0165503900498 
+loss_tra=604.324951172 tgt_loss_tra=0.0175281036645
+epoch=5,t=1080000 
+avg_loss=612.091796875 avg_tgt_loss=0.016636935994 
+loss_tra=604.26965332 tgt_loss_tra=0.0174938235432
+epoch=5,t=1120000 
+avg_loss=612.081298828 avg_tgt_loss=0.0165196955204 
+loss_tra=604.298706055 tgt_loss_tra=0.0175161305815
+epoch=5,t=1160000 
+avg_loss=612.109313965 avg_tgt_loss=0.016478586942 
+loss_tra=604.336425781 tgt_loss_tra=0.0175433773547
+epoch=5,t=1200000 
+avg_loss=612.173522949 avg_tgt_loss=0.0165131501853 
+loss_tra=604.39654541 tgt_loss_tra=0.0175438113511
+---------------------
+Weak learner: 48
+-----Epoch 0-----
+epoch=0,t=40000 
+avg_loss=534.282104492 avg_tgt_loss=104.566680908 
+loss_tra=521.70501709 tgt_loss_tra=104.342857361
+epoch=0,t=80000 
+avg_loss=474.983642578 avg_tgt_loss=79.7832870483 
+loss_tra=464.627197266 tgt_loss_tra=80.0460128784
+epoch=0,t=120000 
+avg_loss=423.011962891 avg_tgt_loss=59.9822692871 
+loss_tra=415.260864258 tgt_loss_tra=60.8949279785
+epoch=0,t=160000 
+avg_loss=378.883605957 avg_tgt_loss=44.562084198 
+loss_tra=372.387084961 tgt_loss_tra=45.5990257263
+epoch=0,t=200000 
+avg_loss=339.301544189 avg_tgt_loss=32.1075210571 
+loss_tra=333.732788086 tgt_loss_tra=33.1162834167
+-----Epoch 1-----
+epoch=1,t=240000 
+avg_loss=305.355773926 avg_tgt_loss=22.4085597992 
+loss_tra=300.149475098 tgt_loss_tra=23.2559928894
+epoch=1,t=280000 
+avg_loss=275.734741211 avg_tgt_loss=14.9021596909 
+loss_tra=270.569030762 tgt_loss_tra=15.5402975082
+epoch=1,t=320000 
+avg_loss=250.378494263 avg_tgt_loss=9.32308959961 
+loss_tra=245.131881714 tgt_loss_tra=9.77236843109
+epoch=1,t=360000 
+avg_loss=228.997924805 avg_tgt_loss=5.38564062119 
+loss_tra=223.494232178 tgt_loss_tra=5.66674232483
+epoch=1,t=400000 
+avg_loss=211.154647827 avg_tgt_loss=2.78447389603 
+loss_tra=205.386001587 tgt_loss_tra=2.94365358353
+-----Epoch 2-----
+epoch=2,t=440000 
+avg_loss=197.025695801 avg_tgt_loss=1.24059534073 
+loss_tra=190.955963135 tgt_loss_tra=1.31669259071
+epoch=2,t=480000 
+avg_loss=186.978546143 avg_tgt_loss=0.46160697937 
+loss_tra=180.572280884 tgt_loss_tra=0.491673797369
+epoch=2,t=520000 
+avg_loss=180.380279541 avg_tgt_loss=0.140213161707 
+loss_tra=173.675857544 tgt_loss_tra=0.149674043059
+epoch=2,t=560000 
+avg_loss=176.798324585 avg_tgt_loss=0.0404376797378 
+loss_tra=169.851699829 tgt_loss_tra=0.0431548058987
+epoch=2,t=600000 
+avg_loss=175.353973389 avg_tgt_loss=0.0194100383669 
+loss_tra=168.245956421 tgt_loss_tra=0.0206664968282
+-----Epoch 3-----
+epoch=3,t=640000 
+avg_loss=174.882843018 avg_tgt_loss=0.0166897177696 
+loss_tra=167.700393677 tgt_loss_tra=0.0177328065038
+epoch=3,t=680000 
+avg_loss=174.721923828 avg_tgt_loss=0.0164832174778 
+loss_tra=167.521438599 tgt_loss_tra=0.0175341423601
+epoch=3,t=720000 
+avg_loss=174.704544067 avg_tgt_loss=0.0164789073169 
+loss_tra=167.50213623 tgt_loss_tra=0.0175314620137
+epoch=3,t=760000 
+avg_loss=174.745239258 avg_tgt_loss=0.0165008716285 
+loss_tra=167.540435791 tgt_loss_tra=0.01753391698
+epoch=3,t=800000 
+avg_loss=174.754730225 avg_tgt_loss=0.0165177211165 
+loss_tra=167.549743652 tgt_loss_tra=0.0175444856286
+-----Epoch 4-----
+epoch=4,t=840000 
+avg_loss=174.699111938 avg_tgt_loss=0.016478067264 
+loss_tra=167.495300293 tgt_loss_tra=0.0175297781825
+epoch=4,t=880000 
+avg_loss=174.690917969 avg_tgt_loss=0.0164715275168 
+loss_tra=167.491790771 tgt_loss_tra=0.0175356566906
+epoch=4,t=920000 
+avg_loss=174.711349487 avg_tgt_loss=0.0164874345064 
+loss_tra=167.50453186 tgt_loss_tra=0.0175287500024
+epoch=4,t=960000 
+avg_loss=174.668563843 avg_tgt_loss=0.0164633318782 
+loss_tra=167.472839355 tgt_loss_tra=0.0175422430038
+epoch=4,t=1000000 
+avg_loss=174.659423828 avg_tgt_loss=0.0164616294205 
+loss_tra=167.45791626 tgt_loss_tra=0.0175325963646
+-----Epoch 5-----
+epoch=5,t=1040000 
+avg_loss=174.799804688 avg_tgt_loss=0.0165773499757 
+loss_tra=167.592926025 tgt_loss_tra=0.0175798032433
+epoch=5,t=1080000 
+avg_loss=174.611480713 avg_tgt_loss=0.0164177510887 
+loss_tra=167.414718628 tgt_loss_tra=0.0175215415657
+epoch=5,t=1120000 
+avg_loss=174.774124146 avg_tgt_loss=0.0165423676372 
+loss_tra=167.574691772 tgt_loss_tra=0.0175728425384
+epoch=5,t=1160000 
+avg_loss=174.779098511 avg_tgt_loss=0.0165583863854 
+loss_tra=167.569717407 tgt_loss_tra=0.0175637751818
+epoch=5,t=1200000 
+avg_loss=174.839904785 avg_tgt_loss=0.0165971610695 
+loss_tra=167.627548218 tgt_loss_tra=0.01757350564
+---------------------
+Weak learner: 49
+-----Epoch 0-----
+epoch=0,t=40000 
+avg_loss=85.66771698 avg_tgt_loss=13.0710830688 
+loss_tra=84.0305633545 tgt_loss_tra=13.3739871979
+epoch=0,t=80000 
+avg_loss=59.1314315796 avg_tgt_loss=4.24965810776 
+loss_tra=57.3209037781 tgt_loss_tra=4.32412338257
+epoch=0,t=120000 
+avg_loss=45.6513252258 avg_tgt_loss=1.39619791508 
+loss_tra=43.8742980957 tgt_loss_tra=1.41290855408
+epoch=0,t=160000 
+avg_loss=38.8750457764 avg_tgt_loss=0.514844477177 
+loss_tra=37.1960449219 tgt_loss_tra=0.521376252174
+epoch=0,t=200000 
+avg_loss=35.8271713257 avg_tgt_loss=0.238291084766 
+loss_tra=34.2201690674 tgt_loss_tra=0.2405282408
+-----Epoch 1-----
+epoch=1,t=240000 
+avg_loss=34.5409355164 avg_tgt_loss=0.137107342482 
+loss_tra=32.9759902954 tgt_loss_tra=0.137192755938
+epoch=1,t=280000 
+avg_loss=33.9754676819 avg_tgt_loss=0.09128510952 
+loss_tra=32.4356803894 tgt_loss_tra=0.0905363932252
+epoch=1,t=320000 
+avg_loss=33.5487670898 avg_tgt_loss=0.065926939249 
+loss_tra=32.0267333984 tgt_loss_tra=0.0648944079876
+epoch=1,t=360000 
+avg_loss=33.3864173889 avg_tgt_loss=0.0507419034839 
+loss_tra=31.8784828186 tgt_loss_tra=0.0498006418347
+epoch=1,t=400000 
+avg_loss=33.2565956116 avg_tgt_loss=0.0408513620496 
+loss_tra=31.756526947 tgt_loss_tra=0.0398493930697
+-----Epoch 2-----
+epoch=2,t=440000 
+avg_loss=33.0890464783 avg_tgt_loss=0.0338097140193 
+loss_tra=31.5999031067 tgt_loss_tra=0.0331013202667
+epoch=2,t=480000 
+avg_loss=33.0927085876 avg_tgt_loss=0.0292735993862 
+loss_tra=31.6081180573 tgt_loss_tra=0.0286253932863
+epoch=2,t=520000 
+avg_loss=33.0822715759 avg_tgt_loss=0.0260442197323 
+loss_tra=31.6031990051 tgt_loss_tra=0.0255575440824
+epoch=2,t=560000 
+avg_loss=33.0507850647 avg_tgt_loss=0.0236553810537 
+loss_tra=31.5765113831 tgt_loss_tra=0.0233344733715
+epoch=2,t=600000 
+avg_loss=32.9326057434 avg_tgt_loss=0.021666156128 
+loss_tra=31.4629592896 tgt_loss_tra=0.021558701992
+-----Epoch 3-----
+epoch=3,t=640000 
+avg_loss=32.8996047974 avg_tgt_loss=0.0203581638634 
+loss_tra=31.4342975616 tgt_loss_tra=0.020423296839
+epoch=3,t=680000 
+avg_loss=33.1035995483 avg_tgt_loss=0.0202294774354 
+loss_tra=31.6338157654 tgt_loss_tra=0.0201451424509
+epoch=3,t=720000 
+avg_loss=32.9148254395 avg_tgt_loss=0.0188884939998 
+loss_tra=31.4517555237 tgt_loss_tra=0.0191126577556
+epoch=3,t=760000 
+avg_loss=32.8637084961 avg_tgt_loss=0.0183254368603 
+loss_tra=31.4076538086 tgt_loss_tra=0.0187408793718
+epoch=3,t=800000 
+avg_loss=32.82447052 avg_tgt_loss=0.0179385393858 
+loss_tra=31.3721904755 tgt_loss_tra=0.018478423357
+-----Epoch 4-----
+epoch=4,t=840000 
+avg_loss=32.7501487732 avg_tgt_loss=0.0175904817879 
+loss_tra=31.2968788147 tgt_loss_tra=0.0182226188481
+epoch=4,t=880000 
+avg_loss=32.9303779602 avg_tgt_loss=0.0178583934903 
+loss_tra=31.4783363342 tgt_loss_tra=0.0183963980526
+epoch=4,t=920000 
+avg_loss=32.8626937866 avg_tgt_loss=0.0174029078335 
+loss_tra=31.4084472656 tgt_loss_tra=0.0179990567267
+epoch=4,t=960000 
+avg_loss=33.0613746643 avg_tgt_loss=0.0180574953556 
+loss_tra=31.5986289978 tgt_loss_tra=0.0184227451682
+epoch=4,t=1000000 
+avg_loss=32.8175354004 avg_tgt_loss=0.0171501748264 
+loss_tra=31.3663692474 tgt_loss_tra=0.0178538728505
+-----Epoch 5-----
+epoch=5,t=1040000 
+avg_loss=33.0861625671 avg_tgt_loss=0.0181452985853 
+loss_tra=31.6293697357 tgt_loss_tra=0.0185886211693
+epoch=5,t=1080000 
+avg_loss=32.7011985779 avg_tgt_loss=0.0170194543898 
+loss_tra=31.2510910034 tgt_loss_tra=0.0178709030151
+epoch=5,t=1120000 
+avg_loss=32.8328361511 avg_tgt_loss=0.0170241296291 
+loss_tra=31.3817863464 tgt_loss_tra=0.0177594795823
+epoch=5,t=1160000 
+avg_loss=32.8984565735 avg_tgt_loss=0.0171475857496 
+loss_tra=31.4456119537 tgt_loss_tra=0.017820302397
+epoch=5,t=1200000 
+avg_loss=32.9583816528 avg_tgt_loss=0.0173310078681 
+loss_tra=31.5008201599 tgt_loss_tra=0.0179252550006
+---------------------
+Weak learner: 50
+-----Epoch 0-----
+epoch=0,t=40000 
+avg_loss=17.6662979126 avg_tgt_loss=17.6662979126 
+loss_tra=17.0151348114 tgt_loss_tra=17.0151348114
+epoch=0,t=80000 
+avg_loss=9.41838169098 avg_tgt_loss=9.41838169098 
+loss_tra=9.08843040466 tgt_loss_tra=9.08843040466
+epoch=0,t=120000 
+avg_loss=4.72439622879 avg_tgt_loss=4.72439622879 
+loss_tra=4.55066871643 tgt_loss_tra=4.55066871643
+epoch=0,t=160000 
+avg_loss=2.1717774868 avg_tgt_loss=2.1717774868 
+loss_tra=2.09341812134 tgt_loss_tra=2.09341812134
+epoch=0,t=200000 
+avg_loss=0.885151863098 avg_tgt_loss=0.885151863098 
+loss_tra=0.855392813683 tgt_loss_tra=0.855392813683
+-----Epoch 1-----
+epoch=1,t=240000 
+avg_loss=0.307823568583 avg_tgt_loss=0.307823568583 
+loss_tra=0.299194335938 tgt_loss_tra=0.299194335938
+epoch=1,t=280000 
+avg_loss=0.0918287113309 avg_tgt_loss=0.0918287113309 
+loss_tra=0.0908030942082 tgt_loss_tra=0.0908030942082
+epoch=1,t=320000 
+avg_loss=0.0299274530262 avg_tgt_loss=0.0299274530262 
+loss_tra=0.0307625997812 tgt_loss_tra=0.0307625997812
+epoch=1,t=360000 
+avg_loss=0.0182170011103 avg_tgt_loss=0.0182170011103 
+loss_tra=0.0191347934306 tgt_loss_tra=0.0191347934306
+epoch=1,t=400000 
+avg_loss=0.0170995872468 avg_tgt_loss=0.0170995872468 
+loss_tra=0.017874782905 tgt_loss_tra=0.017874782905
+-----Epoch 2-----
+epoch=2,t=440000 
+avg_loss=0.0170419272035 avg_tgt_loss=0.0170419272035 
+loss_tra=0.017777768895 tgt_loss_tra=0.017777768895
+epoch=2,t=480000 
+avg_loss=0.0170606486499 avg_tgt_loss=0.0170606486499 
+loss_tra=0.0177824422717 tgt_loss_tra=0.0177824422717
+epoch=2,t=520000 
+avg_loss=0.0169905740768 avg_tgt_loss=0.0169905740768 
+loss_tra=0.0177462920547 tgt_loss_tra=0.0177462920547
+epoch=2,t=560000 
+avg_loss=0.0169885866344 avg_tgt_loss=0.0169885866344 
+loss_tra=0.0177426058799 tgt_loss_tra=0.0177426058799
+epoch=2,t=600000 
+avg_loss=0.0170994922519 avg_tgt_loss=0.0170994922519 
+loss_tra=0.017805442214 tgt_loss_tra=0.017805442214
+-----Epoch 3-----
+epoch=3,t=640000 
+avg_loss=0.0170389562845 avg_tgt_loss=0.0170389562845 
+loss_tra=0.0177651420236 tgt_loss_tra=0.0177651420236
+epoch=3,t=680000 
+avg_loss=0.0170064959675 avg_tgt_loss=0.0170064959675 
+loss_tra=0.017758410424 tgt_loss_tra=0.017758410424
+epoch=3,t=720000 
+avg_loss=0.0169392973185 avg_tgt_loss=0.0169392973185 
+loss_tra=0.0177204888314 tgt_loss_tra=0.0177204888314
+epoch=3,t=760000 
+avg_loss=0.01696507819 avg_tgt_loss=0.01696507819 
+loss_tra=0.0177355892956 tgt_loss_tra=0.0177355892956
+epoch=3,t=800000 
+avg_loss=0.0170769616961 avg_tgt_loss=0.0170769616961 
+loss_tra=0.0177992079407 tgt_loss_tra=0.0177992079407
+-----Epoch 4-----
+epoch=4,t=840000 
+avg_loss=0.0169519465417 avg_tgt_loss=0.0169519465417 
+loss_tra=0.017730075866 tgt_loss_tra=0.017730075866
+epoch=4,t=880000 
+avg_loss=0.0169784296304 avg_tgt_loss=0.0169784296304 
+loss_tra=0.017743896693 tgt_loss_tra=0.017743896693
+epoch=4,t=920000 
+avg_loss=0.0172537565231 avg_tgt_loss=0.0172537565231 
+loss_tra=0.0179116427898 tgt_loss_tra=0.0179116427898
+epoch=4,t=960000 
+avg_loss=0.0170049797744 avg_tgt_loss=0.0170049797744 
+loss_tra=0.0177439413965 tgt_loss_tra=0.0177439413965
+epoch=4,t=1000000 
+avg_loss=0.017052218318 avg_tgt_loss=0.017052218318 
+loss_tra=0.0178005788475 tgt_loss_tra=0.0178005788475
+-----Epoch 5-----
+epoch=5,t=1040000 
+avg_loss=0.0170795377344 avg_tgt_loss=0.0170795377344 
+loss_tra=0.0178024265915 tgt_loss_tra=0.0178024265915
+epoch=5,t=1080000 
+avg_loss=0.0169094018638 avg_tgt_loss=0.0169094018638 
+loss_tra=0.0177082009614 tgt_loss_tra=0.0177082009614
+epoch=5,t=1120000 
+avg_loss=0.0169556699693 avg_tgt_loss=0.0169556699693 
+loss_tra=0.0177430808544 tgt_loss_tra=0.0177430808544
+epoch=5,t=1160000 
+avg_loss=0.0169670693576 avg_tgt_loss=0.0169670693576 
+loss_tra=0.0177348591387 tgt_loss_tra=0.0177348591387
+epoch=5,t=1200000 
+avg_loss=0.0170361474156 avg_tgt_loss=0.0170361474156 
+loss_tra=0.0177634637803 tgt_loss_tra=0.0177634637803
+

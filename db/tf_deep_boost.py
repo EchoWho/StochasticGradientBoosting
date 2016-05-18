@@ -196,7 +196,7 @@ class TFBottleneckLeafNode(object):
     self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
     self.convert_y = convert_y
 
-  def inference(self, x):
+  def inference(self, x, weak_learner_params):
     """ Construct inference part of the node: linear, relu, linear, relu 
       
     Args:
@@ -405,7 +405,7 @@ class TFDeepBoostGraph(object):
         dim_index_end = dim_index+3
         dim = dims[dim_index:dim_index_end]; dim_index = dim_index_end-1
 
-        l_nodes = [TFLeafNode('leaf'+str(ni), dim, self.reg_lambda, 
+        l_nodes = [TFBottleneckLeafNode('leaf'+str(ni), dim, self.reg_lambda, 
             mean_types[i], loss_types[i], 
             opt_types[i], self.weak_classification) for ni in range(n_nodes[i])]  
         l_preds = map(lambda node : node.inference(self.x_placeholder, weak_learner_params), l_nodes)
@@ -434,6 +434,7 @@ class TFDeepBoostGraph(object):
     tgts = [self.y_placeholder] # prediction target of nodes on a level (back to front)
     ll_compute_ops = []
     ll_apply_ops = []
+    self.ll_train_ops = []
     for i in reversed(range(len(n_nodes))):
       print 'depth={}'.format(i)
       l_nodes = self.ll_nodes[i]
@@ -443,13 +444,15 @@ class TFDeepBoostGraph(object):
       else:
         lr_lvl = self.lr_leaf
       #endif
-      l_train_ops = zip(*map(lambda nd : nd.training(self.y_placeholder, lr_lvl), l_nodes))
+      l_train_ops = map(lambda nd : nd.training(self.y_placeholder, lr_lvl), l_nodes)
+      self.ll_train_ops.append(l_train_ops)
       l_compute_ops, l_apply_ops, tgts = [ list(itertools.chain.from_iterable(ops)) 
-          for ops in l_train_ops]
+          for ops in zip(*l_train_ops)]
       ll_compute_ops.append(l_compute_ops)
       ll_apply_ops.append(l_apply_ops)
     #endfor
     #flatten all train_ops in one list
+    self.ll_train_ops = list(reversed(self.ll_train_ops))
     self.compute_ops = list(itertools.chain.from_iterable(ll_compute_ops)) # dbg.training()
     self.apply_ops = list(itertools.chain.from_iterable(ll_apply_ops)) # dbg.training()
     self.train_ops = list(itertools.chain.from_iterable(ll_compute_ops + ll_apply_ops)) # dbg.training()
@@ -487,10 +490,12 @@ class TFDeepBoostGraph(object):
   def training_update(self):
     return self.apply_ops
 
-  def evaluation(self, loss=False):
+  def evaluation(self, loss=False, prediction=None):
     if self.eval_type == None or loss:
       return self.ll_nodes[-1][0].losses[-1]
-    return self.eval_type(self.pred, self.y_placeholder)
+    if prediction is None:
+      prediction = self.pred
+    return self.eval_type(prediction, self.y_placeholder)
 
   def signal_handler(self, signal, frame):
     print 'Interrupt Captured'
@@ -522,8 +527,8 @@ def main(_):
     n_lvls = len(n_nodes)
     mean_types = [tf.sin for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
-    #loss_types = [square_loss_eltws for lvl in range(n_lvls-1) ]
-    loss_types = [logistic_loss_eltws for lvl in range(n_lvls-1) ]
+    loss_types = [square_loss_eltws for lvl in range(n_lvls-1) ]
+    #loss_types = [logistic_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(square_loss_eltws)
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
@@ -624,14 +629,14 @@ def main(_):
 
   dims = [output_dim for _ in xrange(n_lvls+2)] 
   dims[0] = input_dim
-  #dims[1] = input_dim # TODO do it in better style
+  dims[1] = input_dim # TODO do it in better style
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
 
 
   # modify the default tensorflow graph.
-  weak_classification = True
+  weak_classification = False
   dbg = TFDeepBoostGraph(dims, n_nodes, weak_classification, mean_types, loss_types, opt_types,
           weak_learner_params, eval_type)
 
@@ -712,6 +717,7 @@ def main(_):
             sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)],
                 feed_dict=dbg.fill_feed_dict(x_tra[:5000], y_tra[:5000], 
                                              lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+        assert(not np.isnan(avg_loss_tra))
         preds, avg_loss, avg_tgt_loss = sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)], 
             feed_dict=dbg.fill_feed_dict(x_val, y_val, 
                                          lr_boost, lr_leaf, ps_ws_val, reg_lambda))
