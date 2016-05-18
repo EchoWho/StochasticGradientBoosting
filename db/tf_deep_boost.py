@@ -536,8 +536,9 @@ def main(_):
 
     weak_learner_params = {'type':'linear'}
 
-    lr_boost_adam = 1e-3 
-    lr_leaf_adam = 1e-2 
+    lr_boost_adam = 0.3*1e-3 
+    lr_leaf_adam = 0.3*1e-2 
+    lr_decay_step = x_tra.shape[0] * 3
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
@@ -557,6 +558,7 @@ def main(_):
     #mnist lr
     lr_boost_adam = 1e-8
     lr_leaf_adam = 1e-3
+    lr_decay_step = x_tra.shape[0] * 5 
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
@@ -574,6 +576,7 @@ def main(_):
 
     lr_boost_adam = 1e-3 
     lr_leaf_adam = 1e-2 
+    lr_decay_step = x_tra.shape[0] * 3 
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
@@ -600,6 +603,7 @@ def main(_):
     #cifar lr
     lr_boost_adam = 1e-3
     lr_leaf_adam = 1e-2
+    lr_decay_step = x_tra.shape[0] * 3 
     ps_ws_val = 0.5
     reg_lambda = 0 
   else:
@@ -636,10 +640,10 @@ def main(_):
   # is done. However, to prevent infintie epochs, we set an ultimatum on the number of epochs
   # (max_epoch_ult) that stops this.
   epoch = -1
-  max_epoch = np.Inf
+  max_epoch = 100
   max_epoch_ult = max_epoch * 2 
   batch_size = 64
-  val_interval = 500
+  val_interval = batch_size * 10
 
   # if line search, these will shrink learning rate until result improves. 
   do_line_search = False
@@ -665,8 +669,12 @@ def main(_):
 
   stop_program = False
   lr_gamma = 0.3 
-  lr_decay_step = x_tra.shape[0] * 10.0
+  lr_global_step = 0
+
+  # Total number of samples
   global_step = 0
+  tra_err = []
+  val_err = []
 
   while not stop_program and epoch < max_epoch and epoch < max_epoch_ult:
     epoch += 1
@@ -688,9 +696,10 @@ def main(_):
       # Evaluate
       t += si_end-si
       if si_end-si < batch_size: t = 0;
+      lr_global_step += si_end - si
       global_step += si_end - si
-      if global_step > lr_decay_step: 
-        global_step -= lr_decay_step 
+      if lr_global_step > lr_decay_step: 
+        lr_global_step -= lr_decay_step 
         lr_boost *= lr_gamma
         lr_leaf *= lr_gamma
         print("----------------------")
@@ -706,6 +715,10 @@ def main(_):
             feed_dict=dbg.fill_feed_dict(x_val, y_val, 
                                          lr_boost, lr_leaf, ps_ws_val, reg_lambda))
         assert(not np.isnan(avg_loss))
+        
+        tra_err.append( ( global_step, avg_loss_tra, avg_tgt_loss_tra) )
+        val_err.append( ( global_step, avg_loss, avg_tgt_loss) )
+
         # Plotting the fit.
         if dataset == 'arun_1d':
           weak_predictions = sess.run(dbg.weak_learner_inference(), 
@@ -752,6 +765,8 @@ def main(_):
               dbg.saver.save(sess, best_model_path)
               best_avg_loss = avg_loss
     #endfor
+    # end of epoch, so save out the results so far
+    np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix), tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
     if dbg.sigint_capture == True:
       print("----------------------")
       print("Paused. Set parameters before loading the initial model again...")
@@ -765,7 +780,10 @@ def main(_):
       epoch = -1 ; t = 0; 
       dbg.sigint_capture = False
   #endfor
+
   print("Program Finished")
+  np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix), tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
+  pdb.set_trace()
 
 if __name__ == '__main__':
   main(0)

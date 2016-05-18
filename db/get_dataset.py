@@ -24,7 +24,7 @@ def arun_1d(train_set_size = 200000, val_set_size = 200, random_seed = 9122):
   x_tra = np.expand_dims(x_tra, 1)
   x_val = np.expand_dims(x_val, 1)
   #np.random.set_state(rand_state) # reset the old random state
-  return x_tra, y_tra.T, x_val, y_val.T
+  return x_tra, y_tra, x_val, y_val
 
 def mnist():
   from tensorflow.examples.tutorials.mnist import input_data
