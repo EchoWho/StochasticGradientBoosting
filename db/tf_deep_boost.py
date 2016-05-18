@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from math import ceil, floor, sqrt, cos, sin
 import os,signal
 from timer import Timer
+import get_dataset 
 
 import ipdb as pdb
 
@@ -35,8 +36,13 @@ def sigmoid_clf_mean(x):
     return tf.sub(tf.scalar_mul(2.0, tf.sigmoid(x)), tf.ones_like(x))
 
 def logistic_loss_eltws(yp, y):
-  """ Element-wise Logistic Loss. """
+  """ Element-wise Logistic Loss. Assumes {-1, 1} targets"""
   return tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, y))), tf.ones_like(y)))
+
+def logistic_loss_eltws_masked(yp, y):
+  """ Element-wise Logistic Loss, masked by the value of y. Assumes {-1,1} targets with 0s meaning
+    values to be masked """
+  return tf.mul(tf.abs(y), tf.log(tf.add(tf.exp(tf.neg(tf.mul(yp, y))), tf.ones_like(y))))
 
 def square_loss_eltws(yp, y):
   """ Element-wise Square Loss. """
@@ -45,6 +51,12 @@ def square_loss_eltws(yp, y):
 def multi_clf_err(yp, y):
   """ Multi-class classification Error """
   return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
+
+def multi_clf_err_masked(yp, y):
+  """ yp \in [-1, 1], y \in {-1,1} """
+  yp_signed = 2.0*tf.to_float(tf.greater_equal(yp, 0)) - 1.0
+  eltws_correct = tf.mul(tf.abs(y), tf.to_float(tf.equal(yp_signed, y)))
+  return tf.reduce_mean(tf.reduce_sum(eltws_correct, 1))
 
 def tf_linear(name, l, dim, bias=False):
   feature_dim = int(l.get_shape()[-1]) # im_size * im_size
@@ -457,9 +469,9 @@ class TFDeepBoostGraph(object):
     self.apply_ops = list(itertools.chain.from_iterable(ll_apply_ops)) # dbg.training()
     self.train_ops = list(itertools.chain.from_iterable(ll_compute_ops + ll_apply_ops)) # dbg.training()
     # used to create checkpoints of the trained parameters, used for line search
-    self.saver = tf.train.Saver()
     self.sigint_capture = False
     signal.signal(signal.SIGINT, self.signal_handler)
+    self.saver = tf.train.Saver()
     print 'done.'
   #end __init__
 
@@ -502,27 +514,16 @@ class TFDeepBoostGraph(object):
     self.sigint_capture = True
 
 def main(_):
-  # ------------- Dataset -------------
   from textmenu import textmenu
-  datasets = ['arun_1d', 'mnist', 'cifar']
+  # ------------- Dataset -------------
+  datasets = get_dataset.all_names()
   indx = textmenu(datasets)
   if indx == None:
       return
   dataset = datasets[indx]
+  x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
+  model_name_suffix = dataset
   if dataset == 'arun_1d':
-    f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
-    data_set_size = 200000
-    all_data = [pt for pt in dataset_1d(data_set_size, f, 9122)]
-    train_set = list(range(data_set_size))
-    val_set = [pt for pt in dataset_1d(201, f)]
-    val_set = sorted(val_set, key = lambda x: x.x)
-    x_tra = np.expand_dims(np.hstack([ pt.x for pt in all_data]), 1)
-    y_tra = np.expand_dims(np.hstack([ pt.y for pt in all_data]), 1)
-    x_val = np.expand_dims(np.hstack([ pt.x for pt in val_set]), 1)
-    y_val = np.expand_dims(np.hstack([ pt.y for pt in val_set]), 1)
-    model_name_suffix = '1d_reg'
-
-    #n_nodes = [40, 20, 1]
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [tf.sin for lvl in range(n_lvls-1) ]
@@ -541,29 +542,12 @@ def main(_):
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
-    from tensorflow.examples.tutorials.mnist import input_data
-    mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
-
-    train_set = list(range(mnist.train.num_examples))
-    x_tra = mnist.train.images
-    y_tra = mnist.train.labels
-    x_val = mnist.validation.images # validation
-    y_val = mnist.validation.labels
-    model_name_suffix = 'mnist'
-
     n_nodes = [32, 1]
     n_lvls = len(n_nodes)
     mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
-
-    #lr = tf.train.exponential_decay( 
-    #    learning_rate=1e-3, 
-    #    global_step=tp.get_global_step_var(), 
-    #    decay_steps=dataset_train.size() * 10, 
-    #    decay_rate=0.3, staircase=True, name='learning_rate') 
-
 
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
@@ -576,29 +560,24 @@ def main(_):
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
+  elif dataset == 'grasp_hog':
+    n_nodes = [32, 1]
+    n_lvls = len(n_nodes)
+    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
+    mean_types.append(lambda x : x)
+    loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
+    loss_types.append(logistic_loss_eltws_masked)
+
+    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
+    eval_type = multi_clf_err_masked
+    weak_learner_params = {'type':'linear'}
+
+    lr_boost_adam = 1e-3 
+    lr_leaf_adam = 1e-2 
+    ps_ws_val = 1.0
+    reg_lambda = 0.0
+
   elif dataset == 'cifar':
-    data = np.load('/data/data/processed_cifar_resnet.npz')
-    x_all = data['x_tra']; y_all = data['y_tra'];
-    yp_all = data['yp_tra'];
- 
-    x_test = data['x_test']; y_test = data['y_test'];
-    yp_test = data['yp_test'];
-
-    # Adding the images themselves as features
-    #x_all = np.hstack((x_all, data['im_train'][:,::5]))
-    #x_test = np.hstack((x_test,data['im_test'][:,::5]))
-    
-    n_train = x_all.shape[0] 
-    all_indices = np.arange(n_train)
-    np.random.shuffle(all_indices)
-    tra_val_split = 45000 #n_train * 9 // 10
-    tra_indices = all_indices[:tra_val_split]
-    val_indices = all_indices[tra_val_split:]
-
-    x_tra = x_all[tra_indices]; y_tra = y_all[tra_indices] 
-    x_val = x_all[val_indices]; y_val = y_all[val_indices]
-    model_name_suffix = 'cifar10'
-    
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [ tf.sin for lvl in range(n_lvls-1) ]
@@ -623,6 +602,10 @@ def main(_):
     lr_leaf_adam = 1e-2
     ps_ws_val = 0.5
     reg_lambda = 0 
+  else:
+    raise Exception('Did not recognize datset: {}'.format(dataset))
+
+  train_set = list(range(x_tra.shape[0]))
 
   input_dim = len(x_val[0].ravel())
   output_dim = len(y_val[0].ravel())
@@ -641,6 +624,7 @@ def main(_):
           weak_learner_params, eval_type)
 
   init = tf.initialize_all_variables()
+  #sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
   sess = tf.Session()
   print 'Initializing...'
   sess.run(init)
