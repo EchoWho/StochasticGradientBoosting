@@ -23,11 +23,10 @@ def main(_):
   if indx == None:
       return
   dataset = datasets[indx]
-  if dataset == 'arun_1d':
-    x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
-    model_name_suffix = '1d_reg'
+  x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
+  model_name_suffix = dataset
 
-    #n_nodes = [40, 20, 1]
+  if dataset == 'arun_1d':
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [tf.sin for lvl in range(n_lvls-1) ]
@@ -42,32 +41,17 @@ def main(_):
 
     lr_boost_adam = 1e-3 
     lr_leaf_adam = 1e-2 
+    lr_decay_step = x_tra.shape[0] * 3 
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
-    from tensorflow.examples.tutorials.mnist import input_data
-    mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
-
-    x_tra = mnist.train.images
-    y_tra = mnist.train.labels
-    x_val = mnist.validation.images # validation
-    y_val = mnist.validation.labels
-    model_name_suffix = 'mnist'
-
-    n_nodes = [32, 1]
+    n_nodes = [10, 1]
     n_lvls = len(n_nodes)
-    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
+    mean_types = [ tf.nn.relu for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
-
-    #lr = tf.train.exponential_decay( 
-    #    learning_rate=1e-3, 
-    #    global_step=tp.get_global_step_var(), 
-    #    decay_steps=dataset_train.size() * 10, 
-    #    decay_rate=0.3, staircase=True, name='learning_rate') 
-
 
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
@@ -77,32 +61,11 @@ def main(_):
     #mnist lr
     lr_boost_adam = 1e-8
     lr_leaf_adam = 1e-3
+    lr_decay_step = x_tra.shape[0] * 4 
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
   elif dataset == 'cifar':
-    data = np.load('/data/data/processed_cifar_resnet.npz')
-    x_all = data['x_tra']; y_all = data['y_tra'];
-    yp_all = data['yp_tra'];
- 
-    x_test = data['x_test']; y_test = data['y_test'];
-    yp_test = data['yp_test'];
-
-    # Adding the images themselves as features
-    #x_all = np.hstack((x_all, data['im_train'][:,::5]))
-    #x_test = np.hstack((x_test,data['im_test'][:,::5]))
-    
-    n_train = x_all.shape[0] 
-    all_indices = np.arange(n_train)
-    np.random.shuffle(all_indices)
-    tra_val_split = 45000 #n_train * 9 // 10
-    tra_indices = all_indices[:tra_val_split]
-    val_indices = all_indices[tra_val_split:]
-
-    x_tra = x_all[tra_indices]; y_tra = y_all[tra_indices] 
-    x_val = x_all[val_indices]; y_val = y_all[val_indices]
-    model_name_suffix = 'cifar10'
-    
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
     mean_types = [ tf.sin for lvl in range(n_lvls-1) ]
@@ -118,14 +81,16 @@ def main(_):
     x_tra = x_all; y_tra = y_all; yp_tra = yp_all;
     x_val = x_test; y_val = y_test; yp_val = yp_test;
 
-
     weak_learner_params = {'type':'linear'}
 
     #cifar lr
     lr_boost_adam = 1e-3
     lr_leaf_adam = 1e-2
+    lr_decay_step = x_tra.shape[0] * 3 
     ps_ws_val = 0.5
     reg_lambda = 0 
+  else:
+    raise Exception('Did not recognize datset: {}'.format(dataset))
 
   train_set = list(range(x_tra.shape[0]))
   input_dim = len(x_val[0].ravel())
@@ -133,14 +98,10 @@ def main(_):
 
   dims = [output_dim for _ in xrange(n_lvls+2)] 
   dims[0] = input_dim
-  dims[1] = input_dim # TODO do it in better style
-
-  lr_boost = lr_boost_adam
-  lr_leaf  = lr_leaf_adam
-
+  #dims[1] = input_dim # TODO do it in better style
 
   # modify the default tensorflow graph.
-  weak_classification = False
+  weak_classification = True
   dbg = TFDeepBoostGraph(dims, n_nodes, weak_classification, mean_types, loss_types, opt_types,
           weak_learner_params, eval_type)
 
@@ -185,15 +146,22 @@ def main(_):
 
   stop_program = False
   lr_gamma = 0.3 
-  lr_decay_step = np.Inf
+
+  # Total number of samples
   global_step = 0
+  tra_err = []
+  val_err = []
 
   for learneri in range(1,n_nodes[0]+1):
-    max_epoch = 5
+    max_epoch = 12 
     epoch = -1
     t = 0 
     print("---------------------")
     print(" Weak learner: {:d}".format(learneri))
+    # for a new weak learner, reset the learning rates
+    lr_global_step = 0
+    lr_boost = lr_boost_adam
+    lr_leaf  = lr_leaf_adam
     while not stop_program and epoch < max_epoch:
       epoch += 1
       print("-----Epoch {:d}-----".format(epoch))
@@ -229,9 +197,10 @@ def main(_):
         # Evaluate
         t += si_end-si
         if si_end-si < batch_size: t = 0;
+        lr_global_step += si_end - si
         global_step += si_end - si
-        if global_step > lr_decay_step: 
-          global_step -= lr_decay_step 
+        if lr_global_step > lr_decay_step: 
+          lr_global_step -= lr_decay_step 
           lr_boost *= lr_gamma
           lr_leaf *= lr_gamma
           print("----------------------")
@@ -248,6 +217,10 @@ def main(_):
               sess.run([prediction_tensor, dbg.evaluation(False, prediction_tensor), tgt_loss_tensor], 
                   feed_dict=dbg.fill_feed_dict(x_val, y_val, 
                                                lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+
+          tra_err.append( ( global_step, avg_loss_tra, avg_tgt_loss_tra) )
+          val_err.append( ( global_step, avg_loss, avg_tgt_loss) )
+
           assert(not np.isnan(avg_loss))
           # Plotting the fit.
           if dataset == 'arun_1d':
@@ -272,9 +245,13 @@ def main(_):
             plt.plot(x_val, preds, lw=3, color='blue', label='Prediction')
             plt.draw()
             plt.show(block=False)
-          print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
+          print 'learner={},epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(learneri, epoch, t, 
+              avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
 
       #endfor
+      save_fname = '../log/batch_err_vs_gstep_{:s}.npz'.format(model_name_suffix)
+      np.savez(save_fname, tra_err=np.asarray(tra_err), val_err=np.asarray(val_err), learners=learneri) 
+      print('Saved error rates to {}'.format(save_fname))
       if dbg.sigint_capture == True:
         print("----------------------")
         print("Paused. Set parameters before loading the initial model again...")
@@ -289,6 +266,10 @@ def main(_):
         dbg.sigint_capture = False
     #endfor
   print("Program Finished")
+
+  save_fname = '../log/batch_err_vs_gstep_{:s}.npz'.format(model_name_suffix)
+  np.savez(save_fname, tra_err=np.asarray(tra_err), val_err=np.asarray(val_err), learners=learneri) 
+  print('Saved error rates to {}'.format(save_fname))
   pdb.set_trace()
 
 if __name__ == '__main__':

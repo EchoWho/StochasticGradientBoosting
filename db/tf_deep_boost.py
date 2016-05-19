@@ -82,7 +82,7 @@ def tf_conv(name, l, conv_size, stride, bias=False):
   im_size = int(sqrt(feature_dim))
   assert(im_size * im_size == feature_dim)
   input_channels = 1 #TODO: Maybe support RGB images
-  output_channels = 1 
+  output_channels = 5 
   with tf.name_scope(name):
     l_image = tf.reshape(l, [-1, im_size, im_size, input_channels])
     w1 = tf.Variable(
@@ -108,9 +108,8 @@ def tf_conv_transform(name, l, dim, conv_size, stride, f=lambda x:x, bias=False)
   with tf.name_scope(name):
     c1, vc1 = tf_conv(name+'ci', l, conv_size, stride, bias)
     #c2, vc2 = tf_conv(name+'c2i', tf.nn.relu(c1), np.array(conv_size)/2, stride, bias)
-    l1, vl1 = tf_linear(name+'li', tf.nn.relu(c1), (None,dim[1]), bias)
-    r1 = f(l1)
-    return r1, vl1+vc1
+    l1, vl1 = tf_linear(name+'li', f(c1), (None,dim[1]), bias)
+    return l1, vl1+vc1
 
 def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
   with tf.name_scope(name):
@@ -214,10 +213,24 @@ class TFBottleneckLeafNode(object):
     Args:
       x: input tensor, float - [batch_size, intermediate_dim, dim[0]]
     """
-    bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, self.mean_type, last_transform=False)
-    li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
-    self.pred = bn + li_tf
-    self.variables = bn_var + li_tf_var
+
+    if weak_learner_params is None:
+      learner_type = 'linear'
+    else:
+      learner_type = weak_learner_params['type']
+
+    if learner_type == 'linear':
+      bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, self.mean_type, last_transform=False)
+      li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
+      self.pred = bn + li_tf
+      self.variables = bn_var + li_tf_var
+    elif learner_type == 'conv':
+      conv_size = weak_learner_params['conv_size']
+      stride = weak_learner_params['stride']
+      self.pred, self.variables = tf_conv_transform(self.name+'bn', x, self.dim, conv_size, stride, self.mean_type, True) 
+    else:
+      raise Exception("Unrecognized weak_learner_params['type'] == {}".format(learner_type))
+      
     return self.pred
       
   def loss(self, y):
@@ -543,9 +556,9 @@ def main(_):
     reg_lambda = 0.0
 
   elif dataset == 'mnist':
-    n_nodes = [32, 1]
+    n_nodes = [10, 1]
     n_lvls = len(n_nodes)
-    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
+    mean_types = [ tf.nn.relu for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [ logistic_loss_eltws for lvl in range(n_lvls-1) ]
     loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
@@ -616,14 +629,14 @@ def main(_):
 
   dims = [output_dim for _ in xrange(n_lvls+2)] 
   dims[0] = input_dim
-  dims[1] = input_dim # TODO do it in better style
+  #dims[1] = input_dim # TODO do it in better style
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
 
 
   # modify the default tensorflow graph.
-  weak_classification = False
+  weak_classification = True
   dbg = TFDeepBoostGraph(dims, n_nodes, weak_classification, mean_types, loss_types, opt_types,
           weak_learner_params, eval_type)
 
