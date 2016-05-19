@@ -87,7 +87,7 @@ def slice_uci(location='/data/data/slice/slice.npz'):
 DATASETS = {'arun_1d':arun_1d, 
             'mnist':mnist, 
             'cifar':cifar,
-            'grasp_hog':grasp_hog
+            'grasp_hog':grasp_hog,
             'a9a':a9a_uci,
             'slice':slice_uci,
             }

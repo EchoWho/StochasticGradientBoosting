@@ -413,16 +413,16 @@ class TFDeepBoostGraph(object):
     self.loss_types = loss_types
     self.opt_types = opt_types
     self.eval_type = eval_type
-    self.batch_size = tf.placeholder(tf.int32, shape=[])
-    self.lr_boost = tf.placeholder(tf.float32, shape=[]) # placeholder for future changes
-    self.lr_leaf = tf.placeholder(tf.float32, shape=[]) 
-    self.ps_ws_val = tf.placeholder(tf.float32, shape=[])
-    self.reg_lambda = tf.placeholder(tf.float32, shape=[])
+    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
+    self.lr_boost = tf.placeholder(tf.float32, shape=[], name='lr_boost') # placeholder for future changes
+    self.lr_leaf = tf.placeholder(tf.float32, shape=[], name='lr_leaf') 
+    self.ps_ws_val = tf.placeholder(tf.float32, shape=[], name='ps_ws_val')
+    self.reg_lambda = tf.placeholder(tf.float32, shape=[], name='reg_lambda')
 
     # construct inference from bottom up
     print 'Construct inference()'
-    self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]))
-    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]))
+    self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
+    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
     self.ll_nodes = []
     dim_index = 0
     for i in range(len(n_nodes)):
