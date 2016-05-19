@@ -63,9 +63,31 @@ def grasp_hog(location='/data/data/GraspDataset/hog/grasp_hog.npz'):
   return x_tra, y_tra, x_val, y_val
 
 
+def a9a_uci(location='/data/data/a9a/a9a.npz'):
+  data = np.load(location)
+  x_tra = data['x_tra']; y_tra = data['y_tra'];
+  x_val = data['x_test']; y_val = data['y_test'];
+  return x_tra, y_tra, x_val, y_val
+ 
+def slice_uci(location='/data/data/slice/slice.npz'):
+  data = np.load(location)
+  x_all = data['x_tra']; y_all = data['y_tra'];
+  n_train = x_all.shape[0] 
+  all_indices = np.arange(n_train)
+  np.random.shuffle(all_indices)
+  tra_val_split = n_train * 9 // 10
+  tra_indices = all_indices[:tra_val_split]
+  val_indices = all_indices[tra_val_split:]
+  x_tra = x_all[tra_indices]; y_tra = y_all[tra_indices] 
+  x_val = x_all[val_indices]; y_val = y_all[val_indices]
+  return x_tra, y_tra, x_val, y_val
+
+
 # DEFINE FUNCTIONS THAT RETURN EACH DATASET
 DATASETS = {'arun_1d':arun_1d, 
             'mnist':mnist, 
             'cifar':cifar,
             'grasp_hog':grasp_hog
+            'a9a':a9a_uci,
+            'slice':slice_uci,
             }
