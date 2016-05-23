@@ -63,7 +63,7 @@ def multi_clf_err_masked(yp, y):
 
 
 def tf_linear(name, l, dim, bias=False):
-  feature_dim = int(l.get_shape()[-1]) # im_size * im_size
+  feature_dim = l.get_shape().as_list()[-1] # im_size * im_size
   with tf.name_scope(name):
     w1 = tf.Variable(
         tf.truncated_normal([feature_dim, dim[1]],
@@ -76,44 +76,11 @@ def tf_linear(name, l, dim, bias=False):
     l2 = tf.nn.bias_add(l1, b1)
     return l2, [w1, b1]
 
-def tf_conv(name, l, conv_size, stride, bias=False):
-  """
-  Currently assumes 1 channel input SQUARE image (sqrt(len(x)) is assumed to be image size) 
-  :conv_size - [dim_x, dim_y] of the image (TODO: maybe support more channels)
-  :stride - the stride in the image [stride_x, stride_y] for the convolution
-  """
-  feature_dim = int(l.get_shape()[-1]) # im_size * im_size
-  im_size = int(sqrt(feature_dim))
-  assert(im_size * im_size == feature_dim)
-  input_channels = 1 #TODO: Maybe support RGB images
-  output_channels = 5 
-  with tf.name_scope(name):
-    l_image = tf.reshape(l, [-1, im_size, im_size, input_channels])
-    w1 = tf.Variable(
-        tf.truncated_normal([conv_size[0], conv_size[1], input_channels, output_channels],
-                            stddev=3.0 / sqrt(float(conv_size[0]))),
-        name='weights')
-    l1 = tf.nn.conv2d(l_image, w1, strides=[1, stride[0], stride[1], 1], padding='SAME', name='conv')
-    if not bias:
-      return l1, [w1]
-    b1 = tf.Variable(tf.truncated_normal([output_channels], stddev=5.0 /
-        sqrt(float(output_channels))), name='biases')
-    l2 = l1 + b1
-    l2_vec = tf.reshape(l2, [-1, feature_dim/(stride[0]*stride[1])*output_channels])
-    return l2_vec, [w1, b1]
-
 def tf_linear_transform(name, l, dim, f=lambda x:x, bias=False):
   with tf.name_scope(name):
     l1, v1 = tf_linear(name+'li', l, dim, bias)
     r1 = f(l1)
     return r1, v1
-
-def tf_conv_transform(name, l, dim, conv_size, stride, f=lambda x:x, bias=False):
-  with tf.name_scope(name):
-    c1, vc1 = tf_conv(name+'ci', l, conv_size, stride, bias)
-    #c2, vc2 = tf_conv(name+'c2i', tf.nn.relu(c1), np.array(conv_size)/2, stride, bias)
-    l1, vl1 = tf_linear(name+'li', f(c1), (None,dim[1]), bias)
-    return l1, vl1+vc1
 
 def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
   with tf.name_scope(name):
@@ -123,6 +90,39 @@ def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
       r2 = f(l2)
       return r2, v1+v2
     return l2, v1+v2
+
+
+def tf_conv(name, l, filter_size, stride, bias=False):
+  """
+  :l	  - tensor, assume to be a flattened [batch_size, edge_size, edge_size, in_channel] image
+  :filter_size - [dim_x, dim_y, in_channels, out_channels] of the image
+  :stride - the stride in the image [stride_x, stride_y] for the convolution
+  """
+  feature_dim = l.get_shape().as_list()[-1] # im_size * im_size * in_channels
+  in_channels = filter_size[2]
+  out_channels = filter_size[3]
+  im_size = int(sqrt(feature_dim / in_channels))
+  assert(im_size * im_size * in_channels == feature_dim)
+  with tf.name_scope(name):
+    l_image = tf.reshape(l, [-1, im_size, im_size, in_channels])
+    w1 = tf.Variable(tf.truncated_normal(filter_size, stddev=3.0 / 
+            sqrt(float(filter_size[0]))), name='weights')
+    l1 = tf.nn.conv2d(l_image, w1, strides=[1, stride[0], stride[1], 1], padding='SAME', name='conv')
+    lv1 = [w1]
+    if bias:
+      b1 = tf.Variable(tf.truncated_normal([out_channels], stddev=5.0 /
+             sqrt(float(out_channels))), name='biases')
+      l1 = l1 + b1
+      lv1.append(b1)
+      
+    l1_flat = tf.reshape(l1, [-1, feature_dim/(stride[0]*stride[1]*in_channels)*out_channels])
+    return l1_flat, lv1
+
+def tf_conv_transform(name, l, filter_size, stride, f=lambda x:x, bias=False):
+  with tf.name_scope(name):
+    c1, vc1 = tf_conv(name+'ci', l, filter_size, stride, bias)
+    r1 = f(c1)
+    return r1, vc1
 
 class TFLeafNode(object):
   """ Apply a K-dim generalized linear model 
@@ -148,19 +148,41 @@ class TFLeafNode(object):
       
     Args:
       x: input tensor, float - [batch_size, dim[0]]
+      weak_learner_params: a map that maps param name to value. Possible configurations are: 
+          type=        
+          linear       pred = mean(w x); this is default
+          conv	       pred = w1 * mean(flatten(conv(w2, reshape(x)))); need parameter stride, filter_size
+          res          pred = w1 * mean(w2 x) + w3 * x;
     """
-    # linear transformation
+    # default to linear.
     if weak_learner_params is None:
       learner_type = 'linear'
     else:
       learner_type = weak_learner_params['type']
+    # auto-dim computation
+    if self.dim[0] == -1:
+      input_shape = x.get_shape().as_list()
+      self.dim[0] = 1
+      for d in input_shape[1:]: #note that the input_shape[0] is batch_size
+        self.dim[0] *= d
+    # Inference construction
     with tf.name_scope(self.name):
       if learner_type == 'linear':
-        self.pred, self.variables = tf_linear_transform(self.name, x, self.dim, self.mean_type, True) 
+        self.pred, self.variables = tf_linear_transform(self.name+'li', x, self.dim, self.mean_type, True) 
       elif learner_type == 'conv':
-        conv_size = weak_learner_params['conv_size']
+        filter_size = weak_learner_params['filter_size']
         stride = weak_learner_params['stride']
-        self.pred, self.variables = tf_conv_transform(self.name, x, self.dim, conv_size, stride, self.mean_type, True) 
+        c1, cv1 = tf_conv_transform(self.name+'cv1', x, filter_size, stride, self.mean_type, True) 
+        self.pred, lv2 = tf_linear(self.name+'li2', c1, [None, self.dim[1]],  True)
+        self.variables = cv1 + lv2
+      elif learner_type == 'res':
+        inter_dim = weak_learner_params['res_inter_dim'] if 'res_inter_dim' in weak_learner_params.keys() \
+            else self.dim[0] 
+        bn, bn_var = tf_bottleneck(self.name + 'res', x, [self.dim[0], inter_dim, self.dim[-1]], 
+                                   self.mean_type, last_transform=False)
+        li_add, li_add_var = tf_linear(self.name + 'li_add', x, [self.dim[0], self.dim[-1]], bias = False)
+        self.pred = bn + li_add
+        self.variables = bn_var + li_add_var
       else:
         raise Exception("Unrecognized weak_learner_params['type'] == {}".format(learner_type))
     return self.pred
@@ -183,88 +205,6 @@ class TFLeafNode(object):
       else:
         self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
     return self.loss
-
-  def training(self, y, lr):
-    with tf.name_scope(self.name + '_training'):
-      self.optimizer = self.opt_type(lr)
-      compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
-      self.apply_op = [self.optimizer.apply_gradients(compute_op)]
-      self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
-      return self.grads, self.apply_op, []
-
-class TFBottleneckLeafNode(object):
-  """ Apply a bottleneck (resnet) that outputs K dimensions. 
-      that maps the input x to K independently mapped dims.
-  """
-
-  def __init__(self, name, dim, reg_lambda, mean_type, loss_type, opt_type, convert_y):
-    """ record params of the node for construction in the future.
-
-    Args:
-      dim: (D, K)
-    """
-    self.name = name
-    self.dim = dim
-    self.reg_lambda = reg_lambda
-    self.mean_type = mean_type #e.g., tf.nn.relu
-    self.loss_type = loss_type # element-wise loss 
-    self.opt_type = opt_type   #e.g., tf.train.GradientDescentOptimizer
-    self.convert_y = convert_y
-
-  def inference(self, x, weak_learner_params):
-    """ Construct inference part of the node: linear, relu, linear, relu 
-      
-    Args:
-      x: input tensor, float - [batch_size, intermediate_dim, dim[0]]
-    """
-
-    if weak_learner_params is None:
-      learner_type = 'linear'
-    else:
-      learner_type = weak_learner_params['type']
-
-    if learner_type == 'linear':
-      bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, self.mean_type, last_transform=False)
-      li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
-      self.pred = bn + li_tf
-      self.variables = bn_var + li_tf_var
-    elif learner_type == 'conv':
-      conv_size = weak_learner_params['conv_size']
-      stride = weak_learner_params['stride']
-      self.pred, self.variables = tf_conv_transform(self.name+'bn', x, self.dim, conv_size, stride, self.mean_type, True) 
-    else:
-      raise Exception("Unrecognized weak_learner_params['type'] == {}".format(learner_type))
-      
-    return self.pred
-      
-  def loss(self, y):
-    """ Construct TF loss graph given the inference graph.
-
-    Args:
-      y: target (sign and magnitude on each dim), float - [batch_size, dim[1]] 
-    """
-    with tf.name_scope(self.name):
-      if self.convert_y:
-        y_sgn = tf.sign(y, name='y_sgn') # target of dim
-        y_abs = tf.abs(y, name='y_abs')  # wgt of each dim 
-           
-        # weighted average of loss_type(pred, y_sgn)
-        ind_loss = self.loss_type(self.pred, y_sgn)
-        wgt_loss = tf.mul(y_abs, ind_loss, 'wgt_loss')
-        self.loss = tf.reduce_mean(wgt_loss, name='avg_loss')
-      else:
-        self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
-
-    #self.regularized_loss()
-    return self.loss
-
-  def regularized_loss(self):
-    with tf.name_scope(self.name + '_loss'):
-      regulation = 0.0
-      for variable in self.variables:
-        regulation += self.reg_lambda * tf.reduce_sum(tf.square(tf.reshape(variable,[-1])))
-      self.regularized_loss = self.loss + regulation
-    return self.regularized_loss
 
   def training(self, y, lr):
     with tf.name_scope(self.name + '_training'):
@@ -428,24 +368,16 @@ class TFDeepBoostGraph(object):
     self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
     self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
     self.ll_nodes = []
-    dim_index = 0
     for i in range(len(n_nodes)):
+      dim = dims[i:i+2]
       if i == 0:
-        dim_index_end = dim_index+3
-        dim = dims[dim_index:dim_index_end]; dim_index = dim_index_end-1
-
-        l_nodes = [TFBottleneckLeafNode('leaf'+str(ni), dim, self.reg_lambda, 
+        l_nodes = [TFLeafNode('leaf'+str(ni), dim, self.reg_lambda, 
             mean_types[i], loss_types[i], 
             opt_types[i], self.weak_classification) for ni in range(n_nodes[i])]  
         l_preds = map(lambda node : node.inference(self.x_placeholder, weak_learner_params), l_nodes)
       else:
-        dim_index_end = dim_index+2
-        dim = dims[dim_index:dim_index_end]; dim_index = dim_index_end-1
-
-        #l_nodes = [TFBoostNode('boost'+str(ni), dim, mean_types[i], loss_types[i], 
-        #    opt_types[i], self.ps_ws_val, i<len(n_nodes)-1) for ni in range(n_nodes[i])]  
         is_root = i+1==len(n_nodes)
-        l_nodes = [TFBoostNode('boost'+str(ni), dim, self.reg_lambda, 
+        l_nodes = [TFBoostNode('boost'+str(i)+'_'+str(ni), dim, self.reg_lambda, 
             mean_types[i], loss_types[i], 
             opt_types[i], self.ps_ws_val, self.batch_size, self.weak_classification, is_root) for ni in range(n_nodes[i])]  
 
@@ -558,7 +490,7 @@ def main(online_boost):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
-    weak_learner_params = {'type':'linear'}
+    weak_learner_params = {'type':'res', 'res_inter_dim':1}
     weak_classification = False
 
     lr_boost_adam = 0.3*1e-3 
@@ -578,7 +510,7 @@ def main(online_boost):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
 
-    weak_learner_params = {'type':'conv', 'conv_size':[5,5], 'stride':[2,2]}
+    weak_learner_params = {'type':'conv', 'filter_size':[5,5,1,5], 'stride':[2,2], 'output_channels':5}
     weak_classification = True 
     
     #mnist lr
@@ -598,7 +530,7 @@ def main(online_boost):
 
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err_masked
-    weak_learner_params = {'type':'linear'}
+    weak_learner_params = {'type':'res', 'res_inter_dim':x_tra.shape[1]}
     weak_classification = True 
 
     lr_boost_adam = 1e-3 
@@ -646,7 +578,7 @@ def main(online_boost):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = logit_binary_clf_err
 
-    weak_learner_params = {'type':'linear'}
+    weak_learner_params = {'type':'res', 'res_inter_dim':x_tra.shape[1]}
     weak_classification = False 
     
     #mnist lr
@@ -667,7 +599,7 @@ def main(online_boost):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
-    weak_learner_params = {'type':'linear'}
+    weak_learner_params = {'type':'res', 'res_inter_dim':x_tra.shape[1]}
     weak_classification = False
 
     lr_boost_adam = 1e-3 
@@ -681,7 +613,6 @@ def main(online_boost):
     raise Exception('Did not recognize datset: {}'.format(dataset))
 
   # modify the default tensorflow graph.
-
   train_set = list(range(x_tra.shape[0]))
 
   input_dim = len(x_val[0].ravel())
@@ -689,12 +620,6 @@ def main(online_boost):
 
   dims = [output_dim for _ in xrange(n_lvls+2)] 
   dims[0] = input_dim
-  # TODO do it in better style # Uncomment when using BottlneckLeaf and not using conv
-  # Dataset that needs to uncomment:
-  # when usng Bottleneck (implying weak classification = False), and using non-conv Leaf:
-  #   arun_1d, slice
-  if dataset == 'arun_1d' or dataset == 'slice':
-    dims[1] = input_dim
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
