@@ -52,15 +52,11 @@ def multi_clf_err(yp, y):
   """ Multi-class classification Error """
   return tf.reduce_mean(tf.cast(tf.not_equal(tf.argmax(yp,1), tf.argmax(y,1)), tf.float32))
 
-def logit_binary_clf_err(logit, y):
-  return tf.reduce_mean( tf.to_float(tf.not_equal(tf.to_int32(tf.sign(logit)), tf.to_int32(y))))
-
 def multi_clf_err_masked(yp, y):
   """ yp \in [-1, 1], y \in {-1,1} """
   yp_signed = 2.0*tf.to_float(tf.greater_equal(yp, 0)) - 1.0
   eltws_correct = tf.mul(tf.abs(y), tf.to_float(tf.equal(yp_signed, y)))
   return tf.reduce_mean(tf.reduce_sum(eltws_correct, 1))
-
 
 def tf_linear(name, l, dim, bias=False):
   feature_dim = int(l.get_shape()[-1]) # im_size * im_size
@@ -184,10 +180,12 @@ class TFLeafNode(object):
         self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
     return self.loss
 
-  def training(self, y, lr):
+  def training(self, lr, loss=None):
     with tf.name_scope(self.name + '_training'):
       self.optimizer = self.opt_type(lr)
-      compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
+      if loss is None:
+        loss = self.loss
+      compute_op = self.optimizer.compute_gradients(loss, self.variables)
       self.apply_op = [self.optimizer.apply_gradients(compute_op)]
       self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
       return self.grads, self.apply_op, []
@@ -266,10 +264,12 @@ class TFBottleneckLeafNode(object):
       self.regularized_loss = self.loss + regulation
     return self.regularized_loss
 
-  def training(self, y, lr):
+  def training(self, lr, loss=None):
     with tf.name_scope(self.name + '_training'):
       self.optimizer = self.opt_type(lr)
-      compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
+      if loss is None:
+        loss = self.loss
+      compute_op = self.optimizer.compute_gradients(loss, self.variables)
       self.apply_op = [self.optimizer.apply_gradients(compute_op)]
       self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
       return self.grads, self.apply_op, []
@@ -339,7 +339,7 @@ class TFBoostNode(object):
       self.regularized_losses = [ loss + self.regulation for loss in self.losses]
     return self.regularized_losses
       
-  def training(self, y, lr):
+  def training(self, lr, loss=None):
     with tf.name_scope(self.name+'_training'):
       # optimizer (n_children) is for bias
       compute_ops = []
@@ -363,22 +363,10 @@ class TFBoostNode(object):
         #if i == self.n_children:
         #  compute_op = opt.compute_gradients(self.regularized_losses[i], var_list=[self.tf_w, self.ps_ws[i-1]])
         #  apply_op = opt.apply_gradients(compute_op)
-
-        # Compute children targets (gradients w.r.t. previous partial sum) 
-        if i == 0:
-          continue
-        #elif i==1:
-        #  grad_ps = y #- self.psums[i-1]
-          #sum_grads = y
-          #sum_y_hats = self.y_hats[0]
-        else:
-          grad_ps = tf.gradients(self.losses[i], [self.psums[i-1]])[0] * self.batch_size
-          # none-smooth -Delta
-          #sum_grads += grad_ps
-          #sum_y_hats += self.y_hats[i-1]
-        #tgt = sum_grads - sum_y_hats
-        tgt = grad_ps
-        self.children_tgts.append(tgt)
+        
+        if i > 0:
+          tgt = self.losses[i]
+          self.children_tgts.append(tgt)
       #endfor 
       # list of (grads, varname)
       compute_ops = list(itertools.chain.from_iterable(compute_ops))
@@ -417,16 +405,16 @@ class TFDeepBoostGraph(object):
     self.loss_types = loss_types
     self.opt_types = opt_types
     self.eval_type = eval_type
-    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
-    self.lr_boost = tf.placeholder(tf.float32, shape=[], name='lr_boost') # placeholder for future changes
-    self.lr_leaf = tf.placeholder(tf.float32, shape=[], name='lr_leaf') 
-    self.ps_ws_val = tf.placeholder(tf.float32, shape=[], name='ps_ws_val')
-    self.reg_lambda = tf.placeholder(tf.float32, shape=[], name='reg_lambda')
+    self.batch_size = tf.placeholder(tf.int32, shape=[])
+    self.lr_boost = tf.placeholder(tf.float32, shape=[]) # placeholder for future changes
+    self.lr_leaf = tf.placeholder(tf.float32, shape=[]) 
+    self.ps_ws_val = tf.placeholder(tf.float32, shape=[])
+    self.reg_lambda = tf.placeholder(tf.float32, shape=[])
 
     # construct inference from bottom up
     print 'Construct inference()'
-    self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
-    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
+    self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]))
+    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]))
     self.ll_nodes = []
     dim_index = 0
     for i in range(len(n_nodes)):
@@ -467,13 +455,14 @@ class TFDeepBoostGraph(object):
     for i in reversed(range(len(n_nodes))):
       print 'depth={}'.format(i)
       l_nodes = self.ll_nodes[i]
-      _ =  map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
       if i > 0:
         lr_lvl = self.lr_boost
+        map(lambda ni : l_nodes[ni].loss(tgts[ni]), range(n_nodes[i])) 
+        l_train_ops = map(lambda nd : nd.training(lr_lvl), l_nodes)
       else:
         lr_lvl = self.lr_leaf
+        l_train_ops = map(lambda ni : l_nodes[ni].training(lr_lvl, tgts[ni]), range(n_nodes[i]))
       #endif
-      l_train_ops = map(lambda nd : nd.training(self.y_placeholder, lr_lvl), l_nodes)
       self.ll_train_ops.append(l_train_ops)
       l_compute_ops, l_apply_ops, tgts = [ list(itertools.chain.from_iterable(ops)) 
           for ops in zip(*l_train_ops)]
@@ -530,10 +519,7 @@ class TFDeepBoostGraph(object):
     print 'Interrupt Captured'
     self.sigint_capture = True
 
-def main(online_boost):
-  print("------------------------")
-  print("Running Online Boosting = {:s}".format(str(online_boost)))
-  print("------------------------")
+def main(_):
   from textmenu import textmenu
   # ------------- Dataset -------------
   datasets = get_dataset.all_names()
@@ -543,10 +529,6 @@ def main(online_boost):
   dataset = datasets[indx]
   x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
   model_name_suffix = dataset
-  
-  # default params: 
-  lr_gamma = 0.3
-
   if dataset == 'arun_1d':
     n_nodes = [50, 1]
     n_lvls = len(n_nodes)
@@ -559,7 +541,6 @@ def main(online_boost):
     eval_type = None
 
     weak_learner_params = {'type':'linear'}
-    weak_classification = False
 
     lr_boost_adam = 0.3*1e-3 
     lr_leaf_adam = 0.3*1e-2 
@@ -579,7 +560,6 @@ def main(online_boost):
     eval_type = multi_clf_err
 
     weak_learner_params = {'type':'conv', 'conv_size':[5,5], 'stride':[2,2]}
-    weak_classification = True 
     
     #mnist lr
     lr_boost_adam = 1e-8
@@ -599,7 +579,6 @@ def main(online_boost):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err_masked
     weak_learner_params = {'type':'linear'}
-    weak_classification = True 
 
     lr_boost_adam = 1e-3 
     lr_leaf_adam = 1e-2 
@@ -626,7 +605,6 @@ def main(online_boost):
     train_set = list(range(x_tra.shape[0]))
 
     weak_learner_params = {'type':'linear'}
-    weak_classification = True 
 
     #cifar lr
     lr_boost_adam = 1e-3
@@ -634,53 +612,8 @@ def main(online_boost):
     lr_decay_step = x_tra.shape[0] * 3 
     ps_ws_val = 0.5
     reg_lambda = 0 
-
-  elif dataset=='a9a':
-    n_nodes = [10, 1]
-    n_lvls = len(n_nodes)
-    mean_types = [ tf.nn.relu for lvl in range(n_lvls-1) ]
-    mean_types.append(lambda x : x)
-    loss_types = [ square_loss_eltws for lvl in range(n_lvls-1) ]
-    loss_types.append(square_loss_eltws)
-
-    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
-    eval_type = logit_binary_clf_err
-
-    weak_learner_params = {'type':'linear'}
-    weak_classification = False 
-    
-    #mnist lr
-    lr_boost_adam = 1e-8
-    lr_leaf_adam = 1e-3
-    lr_decay_step = x_tra.shape[0] * 5 
-    ps_ws_val = 1.0
-    reg_lambda = 0.0
-
-  elif dataset=='slice':
-    n_nodes = [15, 1]
-    n_lvls = len(n_nodes)
-    mean_types = [tf.sin for lvl in range(n_lvls-1) ]
-    mean_types.append(lambda x : x)
-    loss_types = [square_loss_eltws for lvl in range(n_lvls-1) ]
-    #loss_types = [logistic_loss_eltws for lvl in range(n_lvls-1) ]
-    loss_types.append(square_loss_eltws)
-    opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
-    eval_type = None
-
-    weak_learner_params = {'type':'linear'}
-    weak_classification = False
-
-    lr_boost_adam = 1e-3 
-    lr_leaf_adam = 1e-2 
-    lr_decay_step = x_tra.shape[0] * 4
-    ps_ws_val = 1.0
-    reg_lambda = 0.0
-    lr_gamma = 0.5 
-
   else:
     raise Exception('Did not recognize datset: {}'.format(dataset))
-
-  # modify the default tensorflow graph.
 
   train_set = list(range(x_tra.shape[0]))
 
@@ -689,24 +622,20 @@ def main(online_boost):
 
   dims = [output_dim for _ in xrange(n_lvls+2)] 
   dims[0] = input_dim
-  # TODO do it in better style # Uncomment when using BottlneckLeaf and not using conv
-  # Dataset that needs to uncomment:
-  # when usng Bottleneck (implying weak classification = False), and using non-conv Leaf:
-  #   arun_1d, slice
-  if dataset == 'arun_1d' or dataset == 'slice':
-    dims[1] = input_dim
+  dims[1] = input_dim # TODO do it in better style
 
   lr_boost = lr_boost_adam
   lr_leaf  = lr_leaf_adam
-  lr_global_step = 0
 
+
+  # modify the default tensorflow graph.
+  weak_classification = False
   dbg = TFDeepBoostGraph(dims, n_nodes, weak_classification, mean_types, loss_types, opt_types,
           weak_learner_params, eval_type)
 
   init = tf.initialize_all_variables()
   #sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
-  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.20)
-  sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+  sess = tf.Session()
   print 'Initializing...'
   sess.run(init)
   print 'Initialization done'
@@ -725,6 +654,8 @@ def main(online_boost):
   # if line search, these will shrink learning rate until result improves. 
   do_line_search = False
   min_non_ls_epochs = 4 # min. number of epochs in the beginning where we don't do line search
+  gamma_boost = 0.7
+  gamma_leaf = 0.7
   # linesearch variables
   worsen_cnt = 0
   best_avg_loss = np.Inf 
@@ -743,254 +674,122 @@ def main(online_boost):
   tf.train.SummaryWriter(logdir='../log/',graph=tf.get_default_graph())
 
   stop_program = False
+  lr_gamma = 0.3 
+  lr_global_step = 0
 
   # Total number of samples
   global_step = 0
   tra_err = []
   val_err = []
 
-  if online_boost: 
-    while not stop_program and epoch < max_epoch and epoch < max_epoch_ult:
-      epoch += 1
-      print("-----Epoch {:d}-----".format(epoch))
-      np.random.shuffle(train_set)
-      for si in range(0, len(train_set), batch_size):
-        #print 'train epoch={}, start={}'.format(epoch, si)
-        si_end = min(si+batch_size, len(train_set))
-        x = x_tra[train_set[si:si_end]]
-        y = y_tra[train_set[si:si_end]]
-        
-        if dbg.sigint_capture == True:
-           # don't do any work this iteration, restart all computation with the next
-           break
-        n_applies = len(dbg.training_update())
-        sess.run(dbg.training(),
-            feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-        
-        # Evaluate
-        t += si_end-si
-        if si_end-si < batch_size: t = 0;
-        lr_global_step += si_end - si
-        global_step += si_end - si
-        if lr_global_step > lr_decay_step: 
-          lr_global_step -= lr_decay_step 
-          lr_boost *= lr_gamma
-          lr_leaf *= lr_gamma
-          print("----------------------")
-          print('Decayed step size: lr_boost={:.3g}, lr_leaf={:.3g}'.format(lr_boost, lr_leaf))
-          print("----------------------")
-        if t % val_interval == 0:
-          preds_tra, avg_loss_tra, avg_tgt_loss_tra =\
-              sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)],
-                  feed_dict=dbg.fill_feed_dict(x_tra[:5000], y_tra[:5000], 
-                                               lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-          assert(not np.isnan(avg_loss_tra))
-          preds, avg_loss, avg_tgt_loss = sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)], 
-              feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-                                           lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-          assert(not np.isnan(avg_loss))
-          
-          tra_err.append( ( global_step, avg_loss_tra, avg_tgt_loss_tra) )
-          val_err.append( ( global_step, avg_loss, avg_tgt_loss) )
-
-          # Plotting the fit.
-          if dataset == 'arun_1d':
-            weak_predictions = sess.run(dbg.weak_learner_inference(), 
-              feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-                                           lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-            tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts[2:], 
-              feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-                                           lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-            plt.figure(1)
-            plt.clf()
-            plt.plot(x_val, y_val, lw=3, color='green', label='Ground Truth')
-            for wi, wpreds in enumerate(weak_predictions):
-              if wi==0:
-                # recall the first one learns y directly.
-                plt.plot(x_val, wpreds, label=str(wi))
-              else:
-                plt.plot(x_val, -wpreds, label=str(wi))
-            #for wi, tgt in enumerate(tgts):
-            #  plt.plot(x_val, tgt, label=str(wi))
-            #plt.legend(loc=4)
-            plt.plot(x_val, preds, lw=3, color='blue', label='Prediction')
-            plt.draw()
-            plt.show(block=False)
-          print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
-
-          if epoch < min_non_ls_epochs:
-              continue
-          
-          if do_line_search:
-              # restores if is worse than the best multiple times
-              if avg_loss > best_avg_loss:
-                worsen_cnt += 1
-                if worsen_cnt > restore_threshold:
-                  print 'Restore to previous best loss: {}'.format(best_avg_loss)
-                  dbg.saver.restore(sess, best_model_path)
-                  worsen_cnt = 0
-                  max_epoch += 1
-                  lr_boost *= gamma_boost
-                  lr_leaf *= gamma_leaf
-              else:
-                worsen_cnt = 0
-                lr_boost = lr_boost_adam
-                lr_leaf = lr_leaf_adam
-                dbg.saver.save(sess, best_model_path)
-                best_avg_loss = avg_loss
-      #endfor
-      # end of epoch, so save out the results so far
-      np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix), tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
+  while not stop_program and epoch < max_epoch and epoch < max_epoch_ult:
+    epoch += 1
+    print("-----Epoch {:d}-----".format(epoch))
+    np.random.shuffle(train_set)
+    for si in range(0, len(train_set), batch_size):
+      #print 'train epoch={}, start={}'.format(epoch, si)
+      si_end = min(si+batch_size, len(train_set))
+      x = x_tra[train_set[si:si_end]]
+      y = y_tra[train_set[si:si_end]]
+      
       if dbg.sigint_capture == True:
+         # don't do any work this iteration, restart all computation with the next
+         break
+      n_applies = len(dbg.training_update())
+      sess.run(dbg.training(),
+          feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+      
+      # Evaluate
+      t += si_end-si
+      if si_end-si < batch_size: t = 0;
+      lr_global_step += si_end - si
+      global_step += si_end - si
+      if lr_global_step > lr_decay_step: 
+        lr_global_step -= lr_decay_step 
+        lr_boost *= lr_gamma
+        lr_leaf *= lr_gamma
         print("----------------------")
-        print("Paused. Set parameters before loading the initial model again...")
+        print('Decayed step size: lr_boost={:.3g}, lr_leaf={:.3g}'.format(lr_boost, lr_leaf))
         print("----------------------")
-        # helper functions
-        save_model = lambda fname : dbg.saver.save(sess, fname)
-        save_best = partial(save_model, best_model_path)
-        save_init = partial(save_model, init_model_path)
-        pdb.set_trace()
-        dbg.saver.restore(sess, init_model_path)
-        epoch = -1 ; t = 0; 
-        dbg.sigint_capture = False
-    #endwhile
-    np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix), tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
-  
-  #### Batch boost####
-  else:
+      if t % val_interval == 0:
+        preds_tra, avg_loss_tra, avg_tgt_loss_tra =\
+            sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)],
+                feed_dict=dbg.fill_feed_dict(x_tra[:5000], y_tra[:5000], 
+                                             lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+        assert(not np.isnan(avg_loss_tra))
+        preds, avg_loss, avg_tgt_loss = sess.run([dbg.inference(), dbg.evaluation(), dbg.evaluation(loss=True)], 
+            feed_dict=dbg.fill_feed_dict(x_val, y_val, 
+                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+        assert(not np.isnan(avg_loss))
+        
+        tra_err.append( ( global_step, avg_loss_tra, avg_tgt_loss_tra) )
+        val_err.append( ( global_step, avg_loss, avg_tgt_loss) )
 
-    for learneri in range(1,n_nodes[0]+1):
-      max_epoch = 12 
-      epoch = -1
-      t = 0 
-      print("---------------------")
-      print(" Weak learner: {:d}".format(learneri))
-      # for a new weak learner, reset the learning rates
-      lr_global_step = 0
-      lr_boost = lr_boost_adam
-      lr_leaf  = lr_leaf_adam
-      while not stop_program and epoch < max_epoch:
-        epoch += 1
-        print("-----Epoch {:d}-----".format(epoch))
-        np.random.shuffle(train_set)
-        for si in range(0, len(train_set), batch_size):
-          #print 'train epoch={}, start={}'.format(epoch, si)
-          si_end = min(si+batch_size, len(train_set))
-          x = x_tra[train_set[si:si_end]]
-          y = y_tra[train_set[si:si_end]]
-          
-          if dbg.sigint_capture == True:
-             # don't do any work this iteration, restart all computation with the next
-             break
-          n_applies = len(dbg.training_update())
-          
-          if learneri == 0: # bias
-            # ll_train_ops is a list of list of 3-tuples of (grads, apply_ops, child_tgts)
-            # Each element of the 3-tuple is a list. 
-            # 
-            # Get the last node (boostnode a.k.a. root), and access its first gradient and first
-            # apply ops, which are for the global bias. 
-            # NVM
-            #NVM ... when convert_y == weak_classification == False, ps_w and ps_b are not learned so this is
-            # empty.
-            train_op = [dbg.ll_train_ops[-1][0][0][0], dbg.ll_train_ops[-1][0][1][0]]
-          else:
-            # For each learneri = 1... ,n_nodes[0]+1,
-            # we access the associated leaf node to get its gradients ans apply_ops
-            train_op = dbg.ll_train_ops[0][learneri-1][0] + dbg.ll_train_ops[0][learneri-1][1]
-          sess.run(train_op,
-              feed_dict=dbg.fill_feed_dict(x, y, lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-          
-          # Evaluate
-          t += si_end-si
-          if si_end-si < batch_size: t = 0;
-          lr_global_step += si_end - si
-          global_step += si_end - si
-          if lr_global_step > lr_decay_step: 
-            lr_global_step -= lr_decay_step 
-            lr_boost *= lr_gamma
-            lr_leaf *= lr_gamma
-            print("----------------------")
-            print('Decayed step size: lr_boost={:.3g}, lr_leaf={:.3g}'.format(lr_boost, lr_leaf))
-            print("----------------------")
-          if t % val_interval == 0:
-            prediction_tensor = dbg.ll_nodes[-1][0].psums[learneri]
-            tgt_loss_tensor = dbg.ll_nodes[-1][0].losses[learneri]
-            preds_tra, avg_loss_tra, avg_tgt_loss_tra =\
-                sess.run([prediction_tensor, dbg.evaluation(False, prediction_tensor), tgt_loss_tensor],
-                    feed_dict=dbg.fill_feed_dict(x_tra[:5000], y_tra[:5000], 
-                                                 lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-            preds, avg_loss, avg_tgt_loss = \
-                sess.run([prediction_tensor, dbg.evaluation(False, prediction_tensor), tgt_loss_tensor], 
-                    feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-                                                 lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+        # Plotting the fit.
+        if dataset == 'arun_1d':
+          weak_predictions = sess.run(dbg.weak_learner_inference(), 
+            feed_dict=dbg.fill_feed_dict(x_val, y_val, 
+                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+          tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts[2:], 
+            feed_dict=dbg.fill_feed_dict(x_val, y_val, 
+                                         lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+          plt.figure(1)
+          plt.clf()
+          plt.plot(x_val, y_val, lw=3, color='green', label='Ground Truth')
+          for wi, wpreds in enumerate(weak_predictions):
+            if wi==0:
+              # recall the first one learns y directly.
+              plt.plot(x_val, wpreds, label=str(wi))
+            else:
+              plt.plot(x_val, -wpreds, label=str(wi))
+          #for wi, tgt in enumerate(tgts):
+          #  plt.plot(x_val, tgt, label=str(wi))
+          #plt.legend(loc=4)
+          plt.plot(x_val, preds, lw=3, color='blue', label='Prediction')
+          plt.draw()
+          plt.show(block=False)
+        print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
 
-            tra_err.append( ( global_step, avg_loss_tra, avg_tgt_loss_tra) )
-            val_err.append( ( global_step, avg_loss, avg_tgt_loss) )
-
-            assert(not np.isnan(avg_loss))
-            # Plotting the fit.
-            if dataset == 'arun_1d':
-              #weak_predictions = sess.run(dbg.weak_learner_inference(), 
-              #  feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-              #                               lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-              #tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts[2:], 
-              #  feed_dict=dbg.fill_feed_dict(x_val, y_val, 
-              #                               lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-              plt.figure(1)
-              plt.clf()
-              plt.plot(x_val, y_val, lw=3, color='green', label='Ground Truth')
-              #for wi, wpreds in enumerate(weak_predictions):
-              #  if wi==0:
-              #    # recall the first one learns y directly.
-              #    plt.plot(x_val, wpreds, label=str(wi))
-              #  else:
-              #    plt.plot(x_val, -wpreds, label=str(wi))
-              #for wi, tgt in enumerate(tgts):
-              #  plt.plot(x_val, tgt, label=str(wi))
-              #plt.legend(loc=4)
-              plt.plot(x_val, preds, lw=3, color='blue', label='Prediction')
-              plt.draw()
-              plt.show(block=False)
-            print 'learner={},epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(learneri, epoch, t, 
-                avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
-
-        #endfor
-        save_fname = '../log/batch_err_vs_gstep_{:s}.npz'.format(model_name_suffix)
-        np.savez(save_fname, tra_err=np.asarray(tra_err), val_err=np.asarray(val_err), learners=learneri) 
-        print('Saved error rates to {}'.format(save_fname))
-        if dbg.sigint_capture == True:
-          print("----------------------")
-          print("Paused. Set parameters before loading the initial model again...")
-          print("----------------------")
-          # helper functions
-          save_model = lambda fname : dbg.saver.save(sess, fname)
-          save_best = partial(save_model, best_model_path)
-          save_init = partial(save_model, init_model_path)
-          pdb.set_trace()
-          dbg.saver.restore(sess, init_model_path)
-          epoch = -1 ; t = 0; 
-          dbg.sigint_capture = False
-      #endfor
+        if epoch < min_non_ls_epochs:
+            continue
+        
+        if do_line_search:
+            # restores if is worse than the best multiple times
+            if avg_loss > best_avg_loss:
+              worsen_cnt += 1
+              if worsen_cnt > restore_threshold:
+                print 'Restore to previous best loss: {}'.format(best_avg_loss)
+                dbg.saver.restore(sess, best_model_path)
+                worsen_cnt = 0
+                max_epoch += 1
+                lr_boost *= gamma_boost
+                lr_leaf *= gamma_leaf
+            else:
+              worsen_cnt = 0
+              lr_boost = lr_boost_adam
+              lr_leaf = lr_leaf_adam
+              dbg.saver.save(sess, best_model_path)
+              best_avg_loss = avg_loss
     #endfor
-    np.savez('../log/batch_err_vs_gstep_{:s}.npz'.format(model_name_suffix), tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
-  #endif 
+    # end of epoch, so save out the results so far
+    np.savez('../log/err_vs_gstep_fr_{:s}.npz'.format(model_name_suffix), tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
+    if dbg.sigint_capture == True:
+      print("----------------------")
+      print("Paused. Set parameters before loading the initial model again...")
+      print("----------------------")
+      # helper functions
+      save_model = lambda fname : dbg.saver.save(sess, fname)
+      save_best = partial(save_model, best_model_path)
+      save_init = partial(save_model, init_model_path)
+      pdb.set_trace()
+      dbg.saver.restore(sess, init_model_path)
+      epoch = -1 ; t = 0; 
+      dbg.sigint_capture = False
+  #endfor
 
   print("Program Finished")
-
-  if online_boost:
-    save_fname = '../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix)
-  else:
-    save_fname = '../log/batch_err_vs_gstep_{:s}.npz'.format(model_name_suffix)
-  np.savez(save_fname, tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
-  print('Saved results to: {}'.format(save_fname))
+  np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix), tra_err=np.asarray(tra_err), val_err=np.asarray(val_err)) 
   pdb.set_trace()
 
 if __name__ == '__main__':
-  import argparse
-  parser = argparse.ArgumentParser("TF DEEP but SHALLOW BOOST")
-  parser.add_argument('-b', '--batch', action='store_true', help='run as batch')
-  args = parser.parse_args()
-  online_boost = not args.batch
-
-  main(online_boost)
+  main(0)

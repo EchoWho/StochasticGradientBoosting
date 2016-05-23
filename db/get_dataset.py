@@ -63,7 +63,7 @@ def grasp_hog(location='/data/data/GraspDataset/hog/grasp_hog.npz'):
   return x_tra, y_tra, x_val, y_val
 
 
-def a9a_uci(location='/data/data/a9a/a9a.npz'):
+def a9a_uci(location='/data/data/a9a/a9a_scaled_dataset.npz'):
   data = np.load(location)
   x_tra = data['x_tra']; y_tra = data['y_tra'];
   x_val = data['x_test']; y_val = data['y_test'];
