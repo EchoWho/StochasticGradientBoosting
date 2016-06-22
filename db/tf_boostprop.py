@@ -223,9 +223,9 @@ class TFBottleneckLeafNode(object):
 
     if learner_type == 'linear':
       bn, bn_var = tf_bottleneck(self.name + 'bn', x, self.dim, self.mean_type, last_transform=False)
-      li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
-      self.pred = bn + li_tf
-      self.variables = bn_var + li_tf_var
+      #li_tf, li_tf_var = tf_linear(self.name + 'li_tf', x, [self.dim[0], self.dim[-1]], bias = False)
+      self.pred = bn# + li_tf
+      self.variables = bn_var# + li_tf_var
     elif learner_type == 'conv':
       conv_size = weak_learner_params['conv_size']
       stride = weak_learner_params['stride']
@@ -365,27 +365,13 @@ class TFBoostNode(object):
         #  apply_op = opt.apply_gradients(compute_op)
         
         if i > 0:
-          tgt = self.losses[i]
+          tgt = self.losses[-1] # i] # TODO
           self.children_tgts.append(tgt)
       #endfor 
       # list of (grads, varname)
       compute_ops = list(itertools.chain.from_iterable(compute_ops))
       self.grads = [ op[0] for op in compute_ops ]
 
-      ## Compute the targets for the children
-      #for i in range(1,self.n_children+1):
-      #  grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
-      #  self.children_tgts.append(grad_ps)
-      ##endfor 
-      ## compute_ops is list of (grads, varname)
-      #opt = self.opt_type(lr) # construct the optimizer object 
-      ## Learning the combining weights of weak learners (ps_ws using the final loss)
-      ##compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]+self.ps_ws) 
-      ## Learning only the transformation weight using the final loss
-      #compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]) 
-      ## apply_ops is an tensor flow operation to update variables 
-      #self.apply_ops = [opt.apply_gradients(compute_ops)]
-      #self.grads = [ op[0] for op in compute_ops ]
     return self.grads, self.apply_ops, self.children_tgts
 
 class TFDeepBoostGraph(object):
@@ -530,9 +516,9 @@ def main(_):
   x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
   model_name_suffix = dataset
   if dataset == 'arun_1d':
-    n_nodes = [50, 1]
+    n_nodes = [200, 1]
     n_lvls = len(n_nodes)
-    mean_types = [tf.sin for lvl in range(n_lvls-1) ]
+    mean_types = [ sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [square_loss_eltws for lvl in range(n_lvls-1) ]
     #loss_types = [logistic_loss_eltws for lvl in range(n_lvls-1) ]
@@ -542,9 +528,9 @@ def main(_):
 
     weak_learner_params = {'type':'linear'}
 
-    lr_boost_adam = 0.3*1e-3 
-    lr_leaf_adam = 0.3*1e-2 
-    lr_decay_step = x_tra.shape[0] * 3
+    lr_boost_adam = 0.3*1e-2
+    lr_leaf_adam = 0.3*1e-1
+    lr_decay_step = x_tra.shape[0] * 10
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
@@ -635,7 +621,8 @@ def main(_):
 
   init = tf.initialize_all_variables()
   #sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
-  sess = tf.Session()
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.20)
+  sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
   print 'Initializing...'
   sess.run(init)
   print 'Initialization done'
@@ -735,17 +722,15 @@ def main(_):
                                          lr_boost, lr_leaf, ps_ws_val, reg_lambda))
           plt.figure(1)
           plt.clf()
-          plt.plot(x_val, y_val, lw=3, color='green', label='Ground Truth')
+          plt.plot(x_val, y_val, lw=3, color='green', label='GT')
           for wi, wpreds in enumerate(weak_predictions):
-            if wi==0:
-              # recall the first one learns y directly.
-              plt.plot(x_val, wpreds, label=str(wi))
-            else:
-              plt.plot(x_val, -wpreds, label=str(wi))
+            plt.plot(x_val, -wpreds, label=str(wi))
           #for wi, tgt in enumerate(tgts):
           #  plt.plot(x_val, tgt, label=str(wi))
-          #plt.legend(loc=4)
-          plt.plot(x_val, preds, lw=3, color='blue', label='Prediction')
+          plt.plot(x_val, preds, lw=3, color='blue', label='Yhat')
+          plt.legend(loc='center left', bbox_to_anchor=(1,0.5))
+          plt.title('boostprop')
+          plt.tight_layout()
           plt.draw()
           plt.show(block=False)
         print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)

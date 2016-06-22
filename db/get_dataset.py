@@ -13,7 +13,15 @@ def get_dataset(name):
 
 def arun_1d(train_set_size = 200000, val_set_size = 200, random_seed = 9122):
   MAX_X=5
+  # original ARUN_1D
+  sigmoid = lambda x : 1.0 / (1.0 + np.exp(-x))
   f = lambda x : np.array([8.*np.cos(x) + 2.5*x*np.sin(x) + 2.8*x])
+  # single bump
+  #f = lambda x: np.array([ 10*(sigmoid(3*(x+1.7)) + sigmoid(-3*(x-1.7))-1) ])
+  # sudo sin wave
+  #f = lambda x : np.array([ 10*(sigmoid(3*(x+3.4))+sigmoid(-3*(x+1.7))-sigmoid(3*(x-1.7))-sigmoid(-3*(x-3.4))) ])
+  # square wave:
+  #f = lambda x: np.array([ (x.astype(int) % 2 == 0).astype(np.float32)  ])
   #rand_state = np.random.get_state() # in case we choose to save the old random state
   np.random.seed(random_seed)
   x_tra = -MAX_X+2.*MAX_X*np.random.rand(train_set_size)

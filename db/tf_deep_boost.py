@@ -176,13 +176,17 @@ class TFLeafNode(object):
         self.pred, lv2 = tf_linear(self.name+'li2', c1, [None, self.dim[1]],  True)
         self.variables = cv1 + lv2
       elif learner_type == 'res':
-        inter_dim = weak_learner_params['res_inter_dim'] if 'res_inter_dim' in weak_learner_params.keys() \
-            else self.dim[0] 
-        bn, bn_var = tf_bottleneck(self.name + 'res', x, [self.dim[0], inter_dim, self.dim[-1]], 
-                                   self.mean_type, last_transform=False)
-        li_add, li_add_var = tf_linear(self.name + 'li_add', x, [self.dim[0], self.dim[-1]], bias = False)
-        self.pred = bn + li_add
-        self.variables = bn_var + li_add_var
+        inter_dim = weak_learner_params['res_inter_dim'] \
+            if 'res_inter_dim' in weak_learner_params.keys() else self.dim[0] 
+        add_linear = weak_learner_params['res_add_linear'] \
+            if 'res_add_linear' in weak_learner_params.keys() else True
+        self.pred, self.variables = \
+            tf_bottleneck(self.name + 'res', x, [self.dim[0], inter_dim, self.dim[-1]], 
+                          self.mean_type, last_transform=False)
+        if add_linear: 
+          li_add, li_add_var = tf_linear(self.name + 'li_add', x, [self.dim[0], self.dim[-1]], bias = False)
+          self.pred = self.pred + li_add
+          self.variables = self.variables + li_add_var
       else:
         raise Exception("Unrecognized weak_learner_params['type'] == {}".format(learner_type))
     return self.pred
@@ -206,10 +210,12 @@ class TFLeafNode(object):
         self.loss = tf.reduce_mean(self.loss_type(self.pred, y))
     return self.loss
 
-  def training(self, y, lr):
+  def training(self, lr, loss=None):
     with tf.name_scope(self.name + '_training'):
       self.optimizer = self.opt_type(lr)
-      compute_op = self.optimizer.compute_gradients(self.loss, self.variables)
+      if loss is None:
+        loss = self.loss
+      compute_op = self.optimizer.compute_gradients(loss, self.variables)
       self.apply_op = [self.optimizer.apply_gradients(compute_op)]
       self.grads = [ op[0] for op in compute_op ] #gradient tensors in a list
       return self.grads, self.apply_op, []
@@ -258,6 +264,7 @@ class TFBoostNode(object):
           ps = ps - children_preds[i-1] * self.ps_ws[i-1] * self.ps_ws_val  #/ tf.to_float(sqrt(float(i+1)))
         self.psums.append(ps)
         self.y_hats.append(self.mean_type(tf.matmul(ps, self.tf_w)))
+        self.pred = self.y_hats[-1]
     return self.y_hats[-1]
 
   def loss(self, y):
@@ -279,7 +286,7 @@ class TFBoostNode(object):
       self.regularized_losses = [ loss + self.regulation for loss in self.losses]
     return self.regularized_losses
       
-  def training(self, y, lr):
+  def training(self, lr):
     with tf.name_scope(self.name+'_training'):
       # optimizer (n_children) is for bias
       compute_ops = []
@@ -324,20 +331,6 @@ class TFBoostNode(object):
       compute_ops = list(itertools.chain.from_iterable(compute_ops))
       self.grads = [ op[0] for op in compute_ops ]
 
-      ## Compute the targets for the children
-      #for i in range(1,self.n_children+1):
-      #  grad_ps = tf.neg(tf.gradients(self.losses[i], [self.psums[i-1]])[0])
-      #  self.children_tgts.append(grad_ps)
-      ##endfor 
-      ## compute_ops is list of (grads, varname)
-      #opt = self.opt_type(lr) # construct the optimizer object 
-      ## Learning the combining weights of weak learners (ps_ws using the final loss)
-      ##compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]+self.ps_ws) 
-      ## Learning only the transformation weight using the final loss
-      #compute_ops = opt.compute_gradients(self.losses[-1], var_list=[self.tf_w]) 
-      ## apply_ops is an tensor flow operation to update variables 
-      #self.apply_ops = [opt.apply_gradients(compute_ops)]
-      #self.grads = [ op[0] for op in compute_ops ]
     return self.grads, self.apply_ops, self.children_tgts
 
 class TFDeepBoostGraph(object):
@@ -379,7 +372,8 @@ class TFDeepBoostGraph(object):
         is_root = i+1==len(n_nodes)
         l_nodes = [TFBoostNode('boost'+str(i)+'_'+str(ni), dim, self.reg_lambda, 
             mean_types[i], loss_types[i], 
-            opt_types[i], self.ps_ws_val, self.batch_size, self.weak_classification, is_root) for ni in range(n_nodes[i])]  
+            opt_types[i], self.ps_ws_val, self.batch_size, self.weak_classification, is_root) \
+              for ni in range(n_nodes[i])]  
 
         assert(n_nodes[i-1] % n_nodes[i] == 0)
         nc = n_nodes[i-1] / n_nodes[i] #n_children
@@ -405,7 +399,7 @@ class TFDeepBoostGraph(object):
       else:
         lr_lvl = self.lr_leaf
       #endif
-      l_train_ops = map(lambda nd : nd.training(self.y_placeholder, lr_lvl), l_nodes)
+      l_train_ops = map(lambda nd : nd.training(lr_lvl), l_nodes)
       self.ll_train_ops.append(l_train_ops)
       l_compute_ops, l_apply_ops, tgts = [ list(itertools.chain.from_iterable(ops)) 
           for ops in zip(*l_train_ops)]
@@ -414,9 +408,10 @@ class TFDeepBoostGraph(object):
     #endfor
     #flatten all train_ops in one list
     self.ll_train_ops = list(reversed(self.ll_train_ops))
-    self.compute_ops = list(itertools.chain.from_iterable(ll_compute_ops)) # dbg.training()
-    self.apply_ops = list(itertools.chain.from_iterable(ll_apply_ops)) # dbg.training()
-    self.train_ops = list(itertools.chain.from_iterable(ll_compute_ops + ll_apply_ops)) # dbg.training()
+    self.compute_ops = list(itertools.chain.from_iterable(ll_compute_ops))
+    self.apply_ops = list(itertools.chain.from_iterable(ll_apply_ops))
+    # dbg.training()
+    self.train_ops = list(itertools.chain.from_iterable(ll_compute_ops + ll_apply_ops))
     # used to create checkpoints of the trained parameters, used for line search
     self.sigint_capture = False
     signal.signal(signal.SIGINT, self.signal_handler)
@@ -480,9 +475,9 @@ def main(online_boost):
   lr_gamma = 0.3
 
   if dataset == 'arun_1d':
-    n_nodes = [50, 1]
+    n_nodes = [20, 10, 1]
     n_lvls = len(n_nodes)
-    mean_types = [tf.sin for lvl in range(n_lvls-1) ]
+    mean_types = [sigmoid_clf_mean for lvl in range(n_lvls-1) ]
     mean_types.append(lambda x : x)
     loss_types = [square_loss_eltws for lvl in range(n_lvls-1) ]
     #loss_types = [logistic_loss_eltws for lvl in range(n_lvls-1) ]
@@ -490,12 +485,12 @@ def main(online_boost):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = None
 
-    weak_learner_params = {'type':'res', 'res_inter_dim':1}
+    weak_learner_params = {'type':'res', 'res_inter_dim':1, 'res_add_linear':False}
     weak_classification = False
 
-    lr_boost_adam = 0.3*1e-3 
-    lr_leaf_adam = 0.3*1e-2 
-    lr_decay_step = x_tra.shape[0] * 3
+    lr_boost_adam = 0.3*1e-2 
+    lr_leaf_adam = 0.3*1e-1
+    lr_decay_step = x_tra.shape[0] * 10
     ps_ws_val = 1.0
     reg_lambda = 0.0
 
@@ -723,22 +718,20 @@ def main(online_boost):
             weak_predictions = sess.run(dbg.weak_learner_inference(), 
               feed_dict=dbg.fill_feed_dict(x_val, y_val, 
                                            lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-            tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts[2:], 
+            tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts, 
               feed_dict=dbg.fill_feed_dict(x_val, y_val, 
                                            lr_boost, lr_leaf, ps_ws_val, reg_lambda))
             plt.figure(1)
             plt.clf()
-            plt.plot(x_val, y_val, lw=3, color='green', label='Ground Truth')
+            plt.plot(x_val, y_val, lw=3, color='green', label='GT')
             for wi, wpreds in enumerate(weak_predictions):
-              if wi==0:
-                # recall the first one learns y directly.
-                plt.plot(x_val, wpreds, label=str(wi))
-              else:
-                plt.plot(x_val, -wpreds, label=str(wi))
+              plt.plot(x_val, -wpreds, label='w'+str(wi))
             #for wi, tgt in enumerate(tgts):
-            #  plt.plot(x_val, tgt, label=str(wi))
-            #plt.legend(loc=4)
-            plt.plot(x_val, preds, lw=3, color='blue', label='Prediction')
+            #  plt.plot(x_val, -tgt, label='t'+str(wi))
+            plt.plot(x_val, preds, lw=3, color='blue', label='Yhat')
+            plt.legend(loc='center left', bbox_to_anchor=(1,0.5))
+            plt.title('deepboost')
+            plt.tight_layout()
             plt.draw()
             plt.show(block=False)
           print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
