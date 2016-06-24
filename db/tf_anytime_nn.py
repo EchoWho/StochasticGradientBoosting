@@ -18,9 +18,10 @@ from tf_deep_boost import *
 from signal_handler import *
 
 class AnytimeNeuralNet(object):
-  def __init__(self, n_layers, dims, mean_type, loss_type, opt_type, weak_learner_params):
+  def __init__(self, n_layers, dims, mean_type, loss_type, opt_type, eval_type, weak_learner_params):
     self.dims = dims
     self.mean_type = mean_type; self.loss_type = loss_type; self.opt_type = opt_type;
+    self.eval_type = eval_type
     self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
     self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
     self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
@@ -47,6 +48,10 @@ class AnytimeNeuralNet(object):
     self.optimizer = self.opt_type(self.lr)
     self.train_op = self.optimizer.minimize(self.loss)
 
+    self.eval_result = self.loss
+    if self.eval_type is not None:
+      self.eval_result = self.eval_type(self.pred, self.y_placeholder) 
+    
     self.saver = tf.train.Saver()
 
   def inference(self):
@@ -64,6 +69,9 @@ class AnytimeNeuralNet(object):
   def training(self):
     return self.train_op
 
+  def evaluation(self):
+    return self.eval_result
+
   def fill_feed_dict(self, x, y, lr):
     if isinstance(x, list):
       b_size = len(x)
@@ -74,26 +82,39 @@ class AnytimeNeuralNet(object):
     return feed_dict
 
 def main():
-  #from textmenu import textmenu
   # ------------- Dataset -------------
-  #datasets = get_dataset.all_names()
-  #indx = textmenu(datasets)
-  #if indx == None:
-  #    return
-  #dataset = datasets[indx]
-  dataset= 'arun_1d'
+  from textmenu import textmenu
+  datasets = get_dataset.all_names()
+  indx = textmenu(datasets)
+  if indx == None:
+      return
+  dataset = datasets[indx]
   x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
   model_name_suffix = dataset
 
   # params
-  n_layers = 20
-  lr = 1e-2
-  dims = [x_tra.shape[1], y_tra.shape[1]]
-  mean_type = sigmoid_clf_mean
-  loss_type = square_loss_eltws
-  opt_type = tf.train.AdamOptimizer
-  weak_learner_params = {'type':'res', 'res_inter_dim':1, 'res_add_linear':False}
-  ann = AnytimeNeuralNet(n_layers, dims, mean_type, loss_type, opt_type, weak_learner_params)
+  if dataset == 'arun_1d':
+    n_layers = 20
+    lr = 1e-2
+    dims = [x_tra.shape[1], y_tra.shape[1]]
+    mean_type = sigmoid_clf_mean
+    loss_type = square_loss_eltws
+    opt_type = tf.train.AdamOptimizer
+    eval_type = None
+    weak_learner_params = {'type':'res', 'res_inter_dim':1, 'res_add_linear':False}
+  elif dataset == 'mnist':
+    total_conv = 250
+    n_layers = 1 #50
+    lr = 5e-3
+    dims = [x_tra.shape[1], y_tra.shape[1]]
+    mean_type = tf.nn.relu
+    loss_type = tf.nn.softmax_cross_entropy_with_logits
+    opt_type = tf.train.AdamOptimizer
+    eval_type = multi_clf_err 
+    weak_learner_params = {'type':'conv', 'filter_size':[5,5,1,total_conv//n_layers], 'stride':[2,2]}
+
+  ann = AnytimeNeuralNet(n_layers, dims, mean_type, loss_type, \
+                         opt_type, eval_type, weak_learner_params)
 
   # Model saving paths. 
   model_dir = '../model/'
@@ -107,7 +128,7 @@ def main():
 
   # sessions and initialization
   init = tf.initialize_all_variables()
-  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.2)
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
   sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
   print 'Initializing...'
   sess.run(init)
@@ -141,13 +162,13 @@ def main():
       t += si_end-si
       if si_end-si < batch_size: t = 0;
       if t % val_interval == 0:
-        preds_tra, loss_tra, last_loss_tra = \
-            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss()],
+        preds_tra, loss_tra, last_loss_tra, eval_tra = \
+            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
                 feed_dict=ann.fill_feed_dict(x_tra[:5000], y_tra[:5000],lr))
                                              
         assert(not np.isnan(loss_tra))
-        preds_val, loss_val, last_loss_val = \
-            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss()],
+        preds_val, loss_val, last_loss_val, eval_val = \
+            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
                 feed_dict=ann.fill_feed_dict(x_val, y_val, lr))
         assert(not np.isnan(loss_val))
         
@@ -166,7 +187,7 @@ def main():
           plt.tight_layout()
           plt.draw()
           plt.show(block=False)
-        print 'epoch={},t={} \n loss_val={} last_loss_val={} \n loss_tra={} last_loss_tra={}'.format(epoch, t, loss_val, last_loss_val, loss_tra, last_loss_tra)
+        print 'epoch={},t={} \n loss_val={} last_loss_val={} eval_val={}\n loss_tra={} last_loss_tra={} eval_tra={}'.format(epoch, t, loss_val, last_loss_val, eval_val, loss_tra, last_loss_tra, eval_tra)
     if shandler.captured():
       print("----------------------")
       print("Paused. Set parameters before loading the initial model again...")

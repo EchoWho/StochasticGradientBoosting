@@ -505,7 +505,7 @@ def main(online_boost):
     opt_types =  [ tf.train.AdamOptimizer for lvl in range(n_lvls) ]
     eval_type = multi_clf_err
 
-    weak_learner_params = {'type':'conv', 'filter_size':[5,5,1,5], 'stride':[2,2], 'output_channels':5}
+    weak_learner_params = {'type':'conv', 'filter_size':[5,5,1,5], 'stride':[2,2]}
     weak_classification = True 
     
     #mnist lr
