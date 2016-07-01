@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 from collections import namedtuple
 import itertools
@@ -6,32 +5,113 @@ from functools import partial
 import numpy as np
 import matplotlib.pyplot as plt
 from math import ceil, floor, sqrt, cos, sin
-import os,signal
-from timer import Timer
-import get_dataset 
+import os,signal,sys
 import numpy.linalg as la
 import numpy.random as random
 import scipy.io
-
 import ipdb as pdb
-
 import tensorflow as tf
 
 
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'db'))
+from textmenu import textmenu
+from timer import Timer
+from tf_deep_boost import *
+import get_dataset
+
+def random_feature_layer(x, filter_size, strides, rf_s):
+  with tf.name_scope('random_feature'):
+    rand_stat = random.get_state()
+    
+    W = tf.constant(random.normal(0, 1, filter_size) / rf_s / np.sqrt(2),
+                    dtype=np.float32, name="rf_filter")
+    B = tf.constant(random.uniform(0, 2*np.pi, filter_size[-1]), 
+                    dtype=np.float32, shape=[1,1,filter_size[-1]], name="rf_filter_bias")
+
+    convx = tf.nn.conv2d(x, W, strides=[1,strides[0],strides[1],1], 
+                         padding="SAME", name="rf_conv")
+    convx += B
+    rand_feat = tf.sin(convx, name="rf_sin")
+    return rand_feat
+
+def pca_layer(x, pca_dim):
+  return x
+
 class PCAConvolutionNet(object):
 
-  def __init__(self):
-    pass
+  def __init__(self, n_iters, x_dim, y_dim, l_filter_sizes, l_strides, l_rf_s, l_pca_dim):
+    self.x_dim = x_dim
+    self.y_dim = y_dim
 
+    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
+    self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
+    self.x_placeholders = []
+    self.random_features = []
+    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, y_dim), name='label')
+      
 
+    for i in range(n_iters+1): 
+      x = tf.placeholder(tf.float32, 
+              shape=(None, x_dim[0], x_dim[1], x_dim[2]), name='input'+str(i))
+      self.x_placeholders.append(x)
+      if i <= n_iters:
+        rf_x = random_feature_layer(x, l_filter_sizes[i], l_strides[i], l_rf_s[i])
+        self.random_features.append(rf_x)
+      else:
+        # prediction using the features
+        dim = [ x_dim[0]*x_dim[1]*x_dim[2], y_dim ]
+        x_flat = tf.reshape(x, [self.batch_size, -1])
+        self.y_pred, self.pred_var = tf_linear_transform('linear_pred', 
+            x_flat, dim, f=lambda x:x, bias=True) 
+        self.loss = tf.mean(tf.nn.softmax_cross_entropy_with_logits(y_pred, self.y_placeholder))
+        self.optimizer = tf.train.AdamOptimizer(lr)
+        self.train_op = self.optimizer.minimize(self.loss, var_list=self.pred_var)
+        
+      # update dimension of the feature map (post pca)
+      x_dim[0] /= l_strides[i][0]
+      x_dim[1] /= l_strides[i][1]
+      x_dim[2] = l_pca_dim[i]
+    #end for
+  #end __init__
+      
+  def inference(self, x_bat, y_bat, lr, sess, is_train=True):
+    for i in range(n_iters):
+      # compute random feature
+      rf_x = self.random_features[i].eval(feed_dict=\
+              {self.x_placeholders[i] : x_bat, self.batch_size : x_bat.shape[0]},
+              session=sess)
+      
+      # compute PCA
+      if is_train:
+        online_pca_update(rf_x)
+      x_bat = online_pca_apply(rf_x)
+
+    # prediction and update
+    inference_operations = [self.pred, self.loss]
+    if is_train:
+      inference_operations.append(self.train_op)
+    yp, loss = sess.run(inference_operations, feed_dict=\
+        {self.lr:lr, self.y_placeholder : y_bat, 
+         self.x_placeholders[i] : x_bat, self.batch_size : x_bat.shape[0]})
+    return yp, loss
  
-if __name__ == '__main__':
+def main():
   #import sklearn.linear_model as lm
+
+  datasets = get_dataset.all_names()
+  indx = textmenu(datasets)
+  if indx == None:
+    return  
+  dataset = datasets[indx]
+  x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
+
+
   d = np.load('/data/data/mnist.npz')
   X=d['X']
   Y=d['Y'].ravel()
   Xtest=d['Xtest']
   Ytest=d['Ytest'].ravel()
+  print 'data loaded'
 
   filter_size = [5,5,1,200]
   stride = 2
@@ -79,3 +159,6 @@ if __name__ == '__main__':
   np.savez('hw2_mnist.npz', X=X,Y=Y,Xtest=Xtest,Ytest=Ytest, P=eigvec, W=W,B=B)
   d2 = np.loadz('hw2_mnist.npz')
   scipy.io.savemat('hw2_mnist.mat', d2)
+
+if __name__ == '__main__':
+  main()
