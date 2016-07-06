@@ -104,14 +104,15 @@ def main():
     weak_learner_params = {'type':'res', 'res_inter_dim':1, 'res_add_linear':False}
   elif dataset == 'mnist':
     total_conv = 250
-    n_layers = 1 #50
+    n_layers = 50
     lr = 5e-3
     dims = [x_tra.shape[1], y_tra.shape[1]]
-    mean_type = tf.nn.relu
+    mean_type = tf.sigmoid #tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
     eval_type = multi_clf_err 
-    weak_learner_params = {'type':'conv', 'filter_size':[5,5,1,total_conv//n_layers], 'stride':[2,2]}
+    #weak_learner_params = {'type':'conv', 'filter_size':[5,5,1,total_conv//n_layers], 'stride':[2,2]}
+    weak_learner_params = {'type':'linear', 'filter_size':[5,5,1,total_conv//n_layers], 'stride':[2,2]}
 
   ann = AnytimeNeuralNet(n_layers, dims, mean_type, loss_type, \
                          opt_type, eval_type, weak_learner_params)

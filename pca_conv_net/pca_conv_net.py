@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 from math import ceil, floor, sqrt, cos, sin
 import os,signal,sys
 import numpy.linalg as la
+from numpy.linalg import svd
+from scipy.linalg import svd as scipy_svd
 import numpy.random as random
 import scipy.io
 import ipdb as pdb
@@ -34,8 +36,44 @@ def random_feature_layer(x, filter_size, strides, rf_s):
     rand_feat = tf.sin(convx, name="rf_sin")
     return rand_feat
 
-def pca_layer(x, pca_dim):
-  return x
+
+class OnlineMatrixSketch(object):
+  # convert a matrix of (n, m) to (l, m)
+  def __init__(self, l, m):
+    self.feat_dim = m
+    self.sketch_len = l
+    self.sketch_mat = np.zeros([l, m],dtype=np.float32)
+    self.empty_indx = 0
+    self.mean = np.zeros(m, dtype=np.float32)
+
+  def update(self, x_bat):
+    n_samples = x_bat.shape[0]
+    x_bat_indx = 0
+    while self.empty_indx + n_samples > self.sketch_len:
+      n_inserted = self.sketch_len - self.empty_indx 
+      x_bat_indx_new = x_bat_indx + n_inserted
+      self.sketch_mat[self.empty_indx:, :] = x_bat[x_bat_indx:x_bat_indx_new, :] - self.mean
+      x_bat_indx = x_bat_indx_new
+
+      try:
+        U, s, Vh = svd(self.sketch_mat, full_matrices=False)
+      except:
+        U, s, Vh = scipy_svd(self.sketch_mat, full_matrices=False)
+
+      s_len = s.shape[0]; half_ell = self.sketch_len // 2
+      if s_len >= half_ell: 
+        s[:half_ell] = np.sqrt(s[:half_ell]**2 - s[half_ell]**2)
+        s[half_ell:] = 0.0
+        self.sketch_mat[:half_ell, :] = np.dot(diag(s[:half_ell]), Vh[:half_ell,:])
+        self.sketch_mat[half_ell:, :] = 0
+        self.empty_indx = half_ell 
+
+      
+    n_inserted = n_samples - x_bat_indx
+    if n_inserted > 0:
+      empty_indx_new = self.empty_indx + n_inserted
+      self.sketch_mat[self.empty_indx:empty_indx_new, :] = x_bat[x_bat_indx:, :] - self.mean
+      self.empty_indx = empty_indx_new
 
 class PCAConvolutionNet(object):
 
@@ -83,7 +121,9 @@ class PCAConvolutionNet(object):
       
       # compute PCA
       if is_train:
-        online_pca_update(rf_x)
+        is_mean_update = online_pca_update(rf_x)
+      if is_mean_update:
+        return None, None
       x_bat = online_pca_apply(rf_x)
 
     # prediction and update
