@@ -26,10 +26,39 @@ class AnytimeNeuralNet(object):
     self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
     self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
     self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
+    self.dropout_keep_prob = tf.placeholder(tf.float32, shape=(), name='dropout_keep_prob')
+    #self.dropout_weight = tf.ones((n_layers,),name='drop_balance_weight')
 
-    self.l_nodes = [TFLeafNode('leaf'+str(i), dims, 0, mean_type, None, None, False)
-        for i in range(n_layers)]
-    self.l_preds = map(lambda nd : nd.inference(self.x_placeholder, weak_learner_params), self.l_nodes)
+    # Hack for now adding an initial transformation node for mnist
+    c1, vc1 = tf_conv_transform('conv_tf1', self.x_placeholder, [5, 5, 1, 32], [1,1], tf.nn.relu, True) 
+
+    c1 = tf.nn.max_pool(tf.reshape(c1, [-1,28,28,32]), ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
+    c1 = tf.reshape(c1, [-1, 14*14*32])
+    c2, vc2 = tf_conv_transform('conv_tf2', c1, [5,5,32,64], [1,1], tf.nn.relu, True)
+    c2 = tf.nn.max_pool(tf.reshape(c2, [-1,14,14,64]), ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
+    c2 = tf.reshape(c2, [-1, 7*7*64])
+    # end Hack feature transform
+    
+    transformed_feat_dim = c2.get_shape().as_list()[-1]
+    dims[0] = transformed_feat_dim 
+    self.x = c2
+
+    # Hack: create weak learner manually for now
+    self.l_preds = []
+    inter_dim = weak_learner_params['res_inter_dim']
+    for i in range(n_layers):
+      fc1, fc1_var = tf_linear_transform('fc1_'+str(i), self.x, [dims[0], inter_dim], mean_type) 
+      #fc1 = tf.nn.dropout(fc1, self.dropout_keep_prob)
+      fc2, fc2_var = tf_linear('fc2_'+str(i), fc1, [inter_dim, dims[1]])
+      self.l_preds.append(fc2)
+    # endHack.
+
+    #  
+    #self.l_nodes = [TFLeafNode('leaf'+str(i), dims, 0, mean_type, None, None, False)
+    #    for i in range(n_layers)]
+    #self.l_preds = map(lambda nd : nd.inference(self.x, weak_learner_params), self.l_nodes)
+
+    #self.dropout_flag = tf.nn.dropout(self.dropout_weight, self.dropout_keep_prob, name='dropout_flag')
 
     # psums as predictions at each layer and loss for each layer and overall loss
     self.psums = []
@@ -37,11 +66,11 @@ class AnytimeNeuralNet(object):
     self.loss = 0
     for i in range(n_layers):
       if i == 0:
-        self.psums.append(self.l_preds[0])
+        self.psums.append(self.l_preds[0] )
       else:
         self.psums.append(self.psums[-1] + self.l_preds[i])
       self.losses.append(tf.reduce_mean(loss_type(self.psums[-1], self.y_placeholder), name='loss'+str(i)))
-      self.loss += self.losses[-1]
+      self.loss += self.losses[i] * (i+1)
     self.pred = self.psums[-1]
 
     # optimization / training
@@ -72,13 +101,14 @@ class AnytimeNeuralNet(object):
   def evaluation(self):
     return self.eval_result
 
-  def fill_feed_dict(self, x, y, lr):
+  def fill_feed_dict(self, x, y, lr, kp=1.0):
     if isinstance(x, list):
       b_size = len(x)
     else:
       b_size = x.shape[0]
     feed_dict = { self.x_placeholder : x, self.y_placeholder : y,
-                 self.batch_size : b_size, self.lr : lr } 
+                 self.batch_size : b_size, self.lr : lr, 
+                 self.dropout_keep_prob : kp} 
     return feed_dict
 
 def main():
@@ -103,16 +133,14 @@ def main():
     eval_type = None
     weak_learner_params = {'type':'res', 'res_inter_dim':1, 'res_add_linear':False}
   elif dataset == 'mnist':
-    total_conv = 250
-    n_layers = 50
-    lr = 5e-3
+    n_layers = 8
+    lr = 1e-4 #5e-3
     dims = [x_tra.shape[1], y_tra.shape[1]]
-    mean_type = tf.sigmoid #tf.nn.relu
+    mean_type = tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
     eval_type = multi_clf_err 
-    #weak_learner_params = {'type':'conv', 'filter_size':[5,5,1,total_conv//n_layers], 'stride':[2,2]}
-    weak_learner_params = {'type':'linear', 'filter_size':[5,5,1,total_conv//n_layers], 'stride':[2,2]}
+    weak_learner_params = {'res_inter_dim':128 }
 
   ann = AnytimeNeuralNet(n_layers, dims, mean_type, loss_type, \
                          opt_type, eval_type, weak_learner_params)
@@ -140,8 +168,8 @@ def main():
 
   # training epochs
   train_set = list(range(x_tra.shape[0]))
-  batch_size = 64
-  val_interval = batch_size * 10
+  batch_size = 50
+  val_interval = batch_size * 40
   epoch = 0
   max_epoch = 200
   t=0
@@ -157,7 +185,7 @@ def main():
 
       if shandler.captured():
         break
-      sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr))
+      sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=0.5))
       
       # Evaluate
       t += si_end-si
@@ -166,7 +194,14 @@ def main():
         preds_tra, loss_tra, last_loss_tra, eval_tra = \
             sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
                 feed_dict=ann.fill_feed_dict(x_tra[:5000], y_tra[:5000],lr))
-                                             
+        ps_losses = sess.run(ann.losses, feed_dict=ann.fill_feed_dict(x_tra[:5000], y_tra[:5000],lr))
+        plt.figure(1)
+        plt.clf()
+        plt.plot(np.arange(len(ps_losses)), np.log(ps_losses))
+        plt.title('log scale loss vs. learner id')
+        plt.draw()
+        plt.show(block=False)
+                                    
         assert(not np.isnan(loss_tra))
         preds_val, loss_val, last_loss_val, eval_val = \
             sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
@@ -205,7 +240,7 @@ def main():
     #endfor
     # end of epoch, so save out the results so far
 
-  pdf.set_trace()
+  pdb.set_trace()
   return 0
 
 if __name__ == '__main__':

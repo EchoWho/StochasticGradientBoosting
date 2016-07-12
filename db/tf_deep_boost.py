@@ -106,7 +106,7 @@ def tf_conv(name, l, filter_size, stride, bias=False):
   with tf.name_scope(name):
     l_image = tf.reshape(l, [-1, im_size, im_size, in_channels])
     w1 = tf.Variable(tf.truncated_normal(filter_size, stddev=3.0 / 
-            sqrt(float(filter_size[0]))), name='weights')
+            sqrt(float(in_channels))), name='weights')
     l1 = tf.nn.conv2d(l_image, w1, strides=[1, stride[0], stride[1], 1], padding='SAME', name='conv')
     lv1 = [w1]
     if bias:
@@ -114,7 +114,7 @@ def tf_conv(name, l, filter_size, stride, bias=False):
              sqrt(float(out_channels))), name='biases')
       l1 = l1 + b1
       lv1.append(b1)
-      
+    
     l1_flat = tf.reshape(l1, [-1, feature_dim/(stride[0]*stride[1]*in_channels)*out_channels])
     return l1_flat, lv1
 

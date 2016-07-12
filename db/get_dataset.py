@@ -41,8 +41,10 @@ def mnist():
   train_set = list(range(mnist.train.num_examples))
   x_tra = mnist.train.images
   y_tra = mnist.train.labels
-  x_val = mnist.validation.images # validation
-  y_val = mnist.validation.labels
+  #x_val = mnist.validation.images # validation
+  #y_val = mnist.validation.labels
+  x_val = mnist.test.images
+  y_val = mnist.test.labels
   return x_tra, y_tra, x_val, y_val
 
 def cifar(location = '/data/data/processed_cifar_resnet.npz'):
