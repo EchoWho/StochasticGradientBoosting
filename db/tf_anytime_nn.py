@@ -17,48 +17,63 @@ import tensorflow as tf
 from tf_deep_boost import *
 from signal_handler import *
 
-class AnytimeNeuralNet(object):
-  def __init__(self, n_layers, dims, mean_type, loss_type, opt_type, eval_type, weak_learner_params):
-    self.dims = dims
-    self.mean_type = mean_type; self.loss_type = loss_type; self.opt_type = opt_type;
-    self.eval_type = eval_type
-    self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
-    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
-    self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
-    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
-    self.dropout_keep_prob = tf.placeholder(tf.float32, shape=(), name='dropout_keep_prob')
-    #self.dropout_weight = tf.ones((n_layers,),name='drop_balance_weight')
 
-    # Hack for now adding an initial transformation node for mnist
-    c1, vc1 = tf_conv_transform('conv_tf1', self.x_placeholder, [5, 5, 1, 32], [1,1], tf.nn.relu, True) 
+class MNISTAnytimeNNUtils(object):
+  def __init__(self, params, dims, n_layers):
+    self.params = params
+    self.dims = dims
+    self.n_layers = n_layers
+
+  def preprocess(self, x):
+    c1, vc1 = tf_conv_transform('conv_tf1', x, [5, 5, 1, 32], [1,1], tf.nn.relu, True) 
 
     c1 = tf.nn.max_pool(tf.reshape(c1, [-1,28,28,32]), ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
     c1 = tf.reshape(c1, [-1, 14*14*32])
     c2, vc2 = tf_conv_transform('conv_tf2', c1, [5,5,32,64], [1,1], tf.nn.relu, True)
     c2 = tf.nn.max_pool(tf.reshape(c2, [-1,14,14,64]), ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
     c2 = tf.reshape(c2, [-1, 7*7*64])
-    # end Hack feature transform
-    
-    transformed_feat_dim = c2.get_shape().as_list()[-1]
+    return c2
+
+  def prediction(self, x):
+    l_preds = []
+    inter_dim = self.params['res_inter_dim']
+    for i in range(self.n_layers):
+      add_bias = (i == 0)
+      fc1, fc1_var = tf_linear_transform('fc1_'+str(i), x, [self.dims[0], inter_dim], self.params['mean_type'], bias=add_bias) 
+      fc2, fc2_var = tf_linear('fc2_'+str(i), fc1, [inter_dim, self.dims[1]], bias=add_bias)
+      l_preds.append(fc2)
+    return l_preds
+
+class CIFARAnytimeNNUtils(object):
+  def __init__(self, params, dims, n_layers):
+    self.params = params
+    self.dims = dims
+    self.n_layers = n_layers
+
+  def preprocess(self, x):
+    pass
+
+  def prediction(self, x):
+    pass
+
+class AnytimeNeuralNet(object):
+  def __init__(self, n_layers, dims, utils_type, loss_type, opt_type, eval_type, utils_params):
+    self.dims = dims
+    self.loss_type = loss_type; self.opt_type = opt_type; self.eval_type = eval_type
+    self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
+    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
+    self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
+    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
+    self.dropout_keep_prob = tf.placeholder(tf.float32, shape=(), name='dropout_keep_prob')
+    self.dropout_weights = tf.ones([n_layers], name='ones_dropout_weight')
+    self.dropout_flag = tf.nn.dropout(self.dropout_weights, self.dropout_keep_prob, name='dropout_weight')
+
+    self.dataset_utils = utils_type(utils_params, dims, n_layers)
+    self.x = self.dataset_utils.preprocess(self.x_placeholder)
+    transformed_feat_dim = self.x.get_shape().as_list()[-1]
     dims[0] = transformed_feat_dim 
-    self.x = c2
 
-    # Hack: create weak learner manually for now
-    self.l_preds = []
-    inter_dim = weak_learner_params['res_inter_dim']
-    for i in range(n_layers):
-      fc1, fc1_var = tf_linear_transform('fc1_'+str(i), self.x, [dims[0], inter_dim], mean_type) 
-      #fc1 = tf.nn.dropout(fc1, self.dropout_keep_prob)
-      fc2, fc2_var = tf_linear('fc2_'+str(i), fc1, [inter_dim, dims[1]])
-      self.l_preds.append(fc2)
-    # endHack.
-
-    #  
-    #self.l_nodes = [TFLeafNode('leaf'+str(i), dims, 0, mean_type, None, None, False)
-    #    for i in range(n_layers)]
-    #self.l_preds = map(lambda nd : nd.inference(self.x, weak_learner_params), self.l_nodes)
-
-    #self.dropout_flag = tf.nn.dropout(self.dropout_weight, self.dropout_keep_prob, name='dropout_flag')
+    self.l_preds = self.dataset_utils.prediction(self.x)
 
     # psums as predictions at each layer and loss for each layer and overall loss
     self.psums = []
@@ -66,11 +81,30 @@ class AnytimeNeuralNet(object):
     self.loss = 0
     for i in range(n_layers):
       if i == 0:
-        self.psums.append(self.l_preds[0] )
+        self.psums.append(self.l_preds[0])
       else:
         self.psums.append(self.psums[-1] + self.l_preds[i])
       self.losses.append(tf.reduce_mean(loss_type(self.psums[-1], self.y_placeholder), name='loss'+str(i)))
-      self.loss += self.losses[i] * (i+1)
+      def do_compute_loss(z):
+        if z <= 1 or z==n_layers-1:
+          return True
+        #primes = set([2,3,5,7, 11, 13, 17, 19, 23, 29, 
+        #            31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+        #            73, 79, 83, 89, 97,101,103,107,109,113, 
+        #           127,131,137,139,149,151,157,163,167,173, 
+        #            179,181,191,193,197,199,211,223,227,229, 
+        #            233,239,241,251,257,263,269,271,277,281, 
+        #            283,293,307,311,313,317,331,337,347,349, 
+        #            353,359,367,373,379,383,389,397,401,409, 
+        #            419,421,431,433,439,443,449,457,461,463, 
+        #            467,479,487,491,499,503,509,521,523,541])
+        exponential = set([0,1,3,7,15,31])
+        reverse_exponential = set([31, 30, 28, 24, 16, 0])
+        return z in reverse_exponential
+
+      if do_compute_loss(i):
+        print i
+        self.loss += self.losses[i]
     self.pred = self.psums[-1]
 
     # optimization / training
@@ -123,27 +157,32 @@ def main():
   model_name_suffix = dataset
 
   # params
-  if dataset == 'arun_1d':
-    n_layers = 20
-    lr = 1e-2
-    dims = [x_tra.shape[1], y_tra.shape[1]]
-    mean_type = sigmoid_clf_mean
-    loss_type = square_loss_eltws
-    opt_type = tf.train.AdamOptimizer
-    eval_type = None
-    weak_learner_params = {'type':'res', 'res_inter_dim':1, 'res_add_linear':False}
-  elif dataset == 'mnist':
-    n_layers = 8
-    lr = 1e-4 #5e-3
+  if dataset == 'mnist':
+    n_layers = 1 
+    n_total_inter_dims = 1024
+    lr = 1e-4
     dims = [x_tra.shape[1], y_tra.shape[1]]
     mean_type = tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
     eval_type = multi_clf_err 
-    weak_learner_params = {'res_inter_dim':128 }
+    utils_params = {'res_inter_dim': n_total_inter_dims // n_layers, 'mean_type': mean_type}
+    utils_type = MNISTAnytimeNNUtils
+  elif dataset == 'cifar':
+    n_layers = 5
+    lr = 1e-4
+    dims = [x_tra.shape[1], y_tra.shape[1]]
+    mean_type = tf.nn.relu
+    loss_type = tf.nn.softmax_cross_entropy_with_logits
+    opt_type = tf.train.AdamOptimizer
+    eval_type = multi_clf_err 
+    utils_params = {'res_inter_dim': 128, 'mean_type': mean_type}
+    utils_type = CIFARAnytimeNNUtils
+    print "Not implemented"
+    return -2
 
-  ann = AnytimeNeuralNet(n_layers, dims, mean_type, loss_type, \
-                         opt_type, eval_type, weak_learner_params)
+  ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \
+                         opt_type, eval_type, utils_params)
 
   # Model saving paths. 
   model_dir = '../model/'
@@ -171,7 +210,7 @@ def main():
   batch_size = 50
   val_interval = batch_size * 40
   epoch = 0
-  max_epoch = 200
+  max_epoch = 100
   t=0
   while epoch < max_epoch:
     epoch += 1

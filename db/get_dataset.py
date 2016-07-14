@@ -34,25 +34,29 @@ def arun_1d(train_set_size = 200000, val_set_size = 200, random_seed = 9122):
   #np.random.set_state(rand_state) # reset the old random state
   return x_tra, y_tra, x_val, y_val
 
-def mnist():
+def mnist(validation=False):
   from tensorflow.examples.tutorials.mnist import input_data
   mnist = input_data.read_data_sets('../data/MNIST_data', one_hot=True)
 
   train_set = list(range(mnist.train.num_examples))
   x_tra = mnist.train.images
   y_tra = mnist.train.labels
-  #x_val = mnist.validation.images # validation
-  #y_val = mnist.validation.labels
-  x_val = mnist.test.images
-  y_val = mnist.test.labels
+  if validation:
+    x_val = mnist.validation.images # validation
+    y_val = mnist.validation.labels
+  else:
+    x_val = mnist.test.images
+    y_val = mnist.test.labels
   return x_tra, y_tra, x_val, y_val
 
-def cifar(location = '/data/data/processed_cifar_resnet.npz'):
+def cifar(location = '/data/data/processed_cifar_resnet.npz', validation=False):
   data = np.load(location)
   x_all = data['x_tra']; y_all = data['y_tra'];
   yp_all = data['yp_tra'];
   x_test = data['x_test']; y_test = data['y_test'];
   yp_test = data['yp_test'];
+  if not validation:
+    return x_all, y_all, x_test, y_test
   # Adding the images themselves as features
   #x_all = np.hstack((x_all, data['im_train'][:,::5]))
   #x_test = np.hstack((x_test,data['im_test'][:,::5]))
