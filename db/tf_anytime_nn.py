@@ -85,26 +85,26 @@ class AnytimeNeuralNet(object):
       else:
         self.psums.append(self.psums[-1] + self.l_preds[i])
       self.losses.append(tf.reduce_mean(loss_type(self.psums[-1], self.y_placeholder), name='loss'+str(i)))
-      def do_compute_loss(z):
-        if z <= 1 or z==n_layers-1:
-          return True
-        #primes = set([2,3,5,7, 11, 13, 17, 19, 23, 29, 
-        #            31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
-        #            73, 79, 83, 89, 97,101,103,107,109,113, 
-        #           127,131,137,139,149,151,157,163,167,173, 
-        #            179,181,191,193,197,199,211,223,227,229, 
-        #            233,239,241,251,257,263,269,271,277,281, 
-        #            283,293,307,311,313,317,331,337,347,349, 
-        #            353,359,367,373,379,383,389,397,401,409, 
-        #            419,421,431,433,439,443,449,457,461,463, 
-        #            467,479,487,491,499,503,509,521,523,541])
-        exponential = set([0,1,3,7,15,31])
-        reverse_exponential = set([31, 30, 28, 24, 16, 0])
-        return z in reverse_exponential
+      #def do_compute_loss(z):
+      #  if z <= 1 or z==n_layers-1:
+      #    return True
+      #  #primes = set([2,3,5,7, 11, 13, 17, 19, 23, 29, 
+      #  #            31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+      #  #            73, 79, 83, 89, 97,101,103,107,109,113, 
+      #  #           127,131,137,139,149,151,157,163,167,173, 
+      #  #            179,181,191,193,197,199,211,223,227,229, 
+      #  #            233,239,241,251,257,263,269,271,277,281, 
+      #  #            283,293,307,311,313,317,331,337,347,349, 
+      #  #            353,359,367,373,379,383,389,397,401,409, 
+      #  #            419,421,431,433,439,443,449,457,461,463, 
+      #  #            467,479,487,491,499,503,509,521,523,541])
+      #  exponential = set([0,1,3,7,15,31])
+      #  reverse_exponential = set([31, 30, 28, 24, 16, 0])
+      #  return z in reverse_exponential
 
-      if do_compute_loss(i):
-        print i
-        self.loss += self.losses[i]
+      #if do_compute_loss(i):
+      #  print i
+      self.loss += self.losses[i]
     self.pred = self.psums[-1]
 
     # optimization / training
@@ -153,7 +153,7 @@ def main():
   if indx == None:
       return
   dataset = datasets[indx]
-  x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
+  #x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
   model_name_suffix = dataset
 
   # params
@@ -161,7 +161,8 @@ def main():
     n_layers = 1 
     n_total_inter_dims = 1024
     lr = 1e-4
-    dims = [x_tra.shape[1], y_tra.shape[1]]
+    dataset = get_dataset.MNISTDataset() 
+    dims = dataset.dims
     mean_type = tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
@@ -171,7 +172,8 @@ def main():
   elif dataset == 'cifar':
     n_layers = 5
     lr = 1e-4
-    dims = [x_tra.shape[1], y_tra.shape[1]]
+    dataset = get_dataset.CIFARDataset()
+    dims = dataset.dims
     mean_type = tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
@@ -206,63 +208,50 @@ def main():
   shandler = SignalHandler()
 
   # training epochs
-  train_set = list(range(x_tra.shape[0]))
   batch_size = 50
   val_interval = batch_size * 40
-  epoch = 0
   max_epoch = 100
-  t=0
-  while epoch < max_epoch:
-    epoch += 1
-    print("-----Epoch {:d}-----".format(epoch))
-    np.random.shuffle(train_set)
-    for si in range(0, len(train_set), batch_size):
-      #print 'train epoch={}, start={}'.format(epoch, si)
-      si_end = min(si+batch_size, len(train_set))
-      x = x_tra[train_set[si:si_end]]
-      y = y_tra[train_set[si:si_end]]
+  t = 0
+  last_epoch = -1
+  while dataset.epoch < max_epoch:
+    if last_epoch != dataset.epoch:
+      print("-----Epoch {:d}-----".format(dataset.epoch))
+      last_epoch = dataset.epoch
+      t = 0
 
-      if shandler.captured():
-        break
-      sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=0.5))
+    x, y = dataset.next_batch(batch_size)
+    actual_batch_size = x.shape[0]
+
+    sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=0.5))
       
-      # Evaluate
-      t += si_end-si
-      if si_end-si < batch_size: t = 0;
-      if t % val_interval == 0:
-        preds_tra, loss_tra, last_loss_tra, eval_tra = \
-            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
-                feed_dict=ann.fill_feed_dict(x_tra[:5000], y_tra[:5000],lr))
-        ps_losses = sess.run(ann.losses, feed_dict=ann.fill_feed_dict(x_tra[:5000], y_tra[:5000],lr))
+    # Evaluate
+    t += actual_batch_size
+    if actual_batch_size < batch_size: t = 0;
+    if t % val_interval == 0:
+      x_tra_samples, y_tra_samples = dataset.sample_training(5000)
+      preds_tra, loss_tra, last_loss_tra, eval_tra = \
+          sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
+              feed_dict=ann.fill_feed_dict(x_tra_samples, y_tra_samples, lr))
+
+      if n_layers > 1:
+        ps_losses = sess.run(ann.losses, feed_dict=ann.fill_feed_dict(x_tra_samples, y_tra_samples,lr))
         plt.figure(1)
         plt.clf()
         plt.plot(np.arange(len(ps_losses)), np.log(ps_losses))
         plt.title('log scale loss vs. learner id')
         plt.draw()
         plt.show(block=False)
-                                    
-        assert(not np.isnan(loss_tra))
-        preds_val, loss_val, last_loss_val, eval_val = \
-            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
-                feed_dict=ann.fill_feed_dict(x_val, y_val, lr))
-        assert(not np.isnan(loss_val))
-        
-        # Plotting the fit.
-        if dataset == 'arun_1d':
-          weak_predictions = sess.run(ann.weak_learner_inference(), 
-              feed_dict=ann.fill_feed_dict(x_val, y_val, lr)) 
-          plt.figure(1)
-          plt.clf()
-          plt.plot(x_val, y_val, lw=3, color='green', label='GT')
-          for wi, wpreds in enumerate(weak_predictions):
-            plt.plot(x_val, wpreds, label='w'+str(wi))
-          plt.plot(x_val, preds_val, lw=3, color='blue', label='Yhat')
-          plt.legend(loc='center left', bbox_to_anchor=(1,0.5))
-          plt.title('AnytimeNeuralNet')
-          plt.tight_layout()
-          plt.draw()
-          plt.show(block=False)
-        print 'epoch={},t={} \n loss_val={} last_loss_val={} eval_val={}\n loss_tra={} last_loss_tra={} eval_tra={}'.format(epoch, t, loss_val, last_loss_val, eval_val, loss_tra, last_loss_tra, eval_tra)
+                                  
+      assert(not np.isnan(loss_tra))
+
+      x_val, y_val = dataset.next_validation()
+      preds_val, loss_val, last_loss_val, eval_val = \
+          sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
+              feed_dict=ann.fill_feed_dict(x_val, y_val, lr))
+      assert(not np.isnan(loss_val))
+      
+      print 'epoch={},t={} \n loss_val={} last_loss_val={} eval_val={}\n loss_tra={} last_loss_tra={} eval_tra={}'.format(dataset.epoch, t, loss_val, last_loss_val, eval_val, loss_tra, last_loss_tra, eval_tra)
+    #ENDIF evaluation
     if shandler.captured():
       print("----------------------")
       print("Paused. Set parameters before loading the initial model again...")
@@ -273,11 +262,10 @@ def main():
       save_init = partial(save_model, init_model_path)
       pdb.set_trace()
       ann.saver.restore(sess, init_model_path)
-      epoch = -1 ; t = 0; 
+      dataset.epoch = 0
       shandler.reset()
-
-    #endfor
-    # end of epoch, so save out the results so far
+    #ENDIF handler of signals
+  # end of epoch checks, so save out the results so far
 
   pdb.set_trace()
   return 0
