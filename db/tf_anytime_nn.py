@@ -44,16 +44,73 @@ class MNISTAnytimeNNUtils(object):
       l_preds.append(fc2)
     return l_preds
 
-class CIFARAnytimeNNUtils(object):
-  def __init__(self, params, dims, n_layers):
+class CIFARAnytimeNN2DUtils(object):
+  def __init__(self, params, dims, batch_size):
     self.params = params
     self.dims = dims
     self.n_layers = n_layers
 
-  def preprocess(self, x):
-    pass
+    self.image_side = 32
+    self.crop_side = 28
+    self.channels = [ 16, 32, 64 ]
+    self.strides = [ 1, 2, 2 ]
+    self.mean_type = tf.nn.relu 
 
-  def prediction(self, x):
+  def preprocess(self, x):
+    # crop to 28*28
+
+    x = tf.reshape(x, [batch_size, self.image_side, self.image_side, 3])
+    x = tf.random_crop(x, [batch_size, self.crop_side, self.crop_side, 3], seed=708, name='cropped_x')
+    # flip left-right
+    x = tf.image.random_flip_left_right(x)
+    # per image mean 
+    x = tf.image.per_image_whitening(x)
+    # 3x3 conv to 16 channels
+    n_chnl = self.channels[0]
+    x = tf_conv('init_conv', tf.reshape(x, [batch_size,self.crop_side*self.crop_side*n_chnl]), [3,3,3,n_chnl], [1,1], False)
+    return x
+
+  def generate_one_feature(self, prev_pred, batch_size, i, j, k):
+    if i == 0:
+      prev_n_chnl = self.channels[0]
+    else:
+      prev_n_chnl = self.channels[i-1]
+    pred = tf_conv('conv_'+str(i)+'_'+str(j)+'_'+str(k), prev_pred, [3,3,prev_n_chnl,self.channels[i]], [self.strides[i], self.strides[i]], False)
+    return pred
+
+  def feature_grid(self, x, batch_size):
+    ll_feats = []
+    prev_l_feats = []
+    for i in range(self.params['depth']):
+      l_feats = []
+      for j in range(self.params['width']):
+        if i == 0:
+          feat = self.generate_one_feature(x, batch_size, i, j)
+        else:
+          feat = 0
+          for k in range(j):
+            feat += self.generate_one_feature(prev_l_feats[k], batch_size, i, j, k)
+        feat = self.mean_type(pred)
+        l_feats.append(feat)
+      ll_feats.append(l_feats)
+      prev_l_feats = l_feats
+    return ll_feats
+
+  def weak_predictions(self, x, batch_size):
+    ll_feats = self.feature_grid(x, batch_size)
+    # Option 1: inidividual output pred[i,j] = f(feat[i,j])
+    ll_preds = []
+    for i in range(self.params['depth']):
+      f_dim = ll_feats[i][0].get_shape().as_list()[-1] 
+      ll_preds.append(map(ll_feats[i], lambda feat : tf_linear('fc', feat, [f_dim, self.dims[1]], bias=False)))
+
+    # Option 2: boosting: pred[i,j] = sum_{k <= j} f(feat[i,k])
+
+    # Option 3: current row as feature: pred[i,j] = f( sum_{k<=j} w[k] * feat[i,k] )
+    return ll_preds
+
+  def anytime_prediction_order(self, ll_preds):
+    
     pass
 
 class AnytimeNeuralNet(object):
@@ -144,6 +201,33 @@ class AnytimeNeuralNet(object):
                  self.batch_size : b_size, self.lr : lr, 
                  self.dropout_keep_prob : kp} 
     return feed_dict
+
+class AnytimeNeuralNet2D(AnytimeNeuralNet):
+  def __init__(self, dims, utils_type, loss_type, opt_type, eval_type, utils_params):
+    self.dims = dims
+    self.loss_type = loss_type; self.opt_type = opt_type; self.eval_type = eval_type
+    self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
+    self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
+    self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
+    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
+
+    self.dataset_utils = utils_type(utils_params, dims, batch_size)
+    self.x = self.dataset_utils.preprocess(self.x_placeholder)
+    self.ll_preds = self.dataset_utils.weak_predictions(self.x)
+    self.anytime_preds = self.dataset_utils.anytime_prediction_order(self.ll_preds)
+    self.pred = self.anytime_preds[-1]
+    self.losses = [ tf.reduce_mean(loss_type(apred, self.y_placeholder), name='loss'+str(ai)) for ai, apred in enumerate(self.anytime_preds) ] 
+    self.loss = sum(self.losses)
+    
+    # optimization / training
+    self.optimizer = self.opt_type(self.lr)
+    self.train_op = self.optimizer.minimize(self.loss)
+
+    self.eval_result = self.loss
+    if self.eval_type is not None:
+      self.eval_result = self.eval_type(self.pred, self.y_placeholder) 
+    
+    self.saver = tf.train.Saver()
 
 def main():
   # ------------- Dataset -------------
