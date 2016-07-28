@@ -52,6 +52,7 @@ class CIFARDataset(Dataset):
       self.data_dict = np.load(self.loc + '/' + self.train_fn_prefix + str(self.train_fn_indx))
       self.x_tra = self.data_dict['data']
       self.y_tra = label2onehot(self.data_dict['labels'], 10)
+      self.x_tra_means = np.mean(self.x_tra, axis=1)[:, np.newaxis]
       self.total_samples = self.data_dict['data'].shape[0]
       self.train_order = np.arange(self.total_samples, dtype=np.int32)
       np.random.shuffle(self.train_order)
@@ -63,19 +64,32 @@ class CIFARDataset(Dataset):
       self.epoch += 1
     tra_indx = self.train_order[old_indx:self.train_indx]
     # return x_tra, y_tra
-    return self.x_tra[tra_indx].astype(np.float32), self.y_tra[tra_indx]
+    return self.x_tra[tra_indx].astype(np.float32) - self.x_tra_means[tra_indx], self.y_tra[tra_indx]
+
+  def sample_training(self, size):
+    return self.x_tra[:size] - self.x_tra_means[:size], self.y_tra[:size]
 
   def next_validation(self, size=None):
-    print "Not Implemented"
-    return 0
+    return self.next_test(size)
 
   def next_test(self, size=None):
     if self.test_data_dict is None:
       self.test_data_dict = np.load(self.loc+'/'+self.test_fn)
       self.x_test = self.test_data_dict['data'].astype(np.float32)
+      self.x_test_mean = np.mean(self.x_test, axis=1)
+      self.x_test -= self.x_test_mean[:, np.newaxis].astype(np.float32)
       self.y_test = label2onehot(self.test_data_dict['labels'],10)
       self.test_data_dict = 0
-    return self.x_test, self.y_test
+      self.test_indx = 0 
+
+    if size is None:
+      size = self.x_test.shape[0]
+    if self.test_indx == self.x_test.shape[0]:
+      self.test_indx = 0
+    old_indx = self.test_indx
+    self.test_indx += size
+    self.test_indx = min(self.test_indx, self.x_test.shape[0])
+    return self.x_test[old_indx:self.test_indx], self.y_test[old_indx:self.test_indx]
 
 class MNISTDataset(Dataset):
   def __init__(self):
@@ -93,8 +107,10 @@ class MNISTDataset(Dataset):
     self.n_train = self.x_tra.shape[0]
     self.tra_indx = self.n_train
     self.train_order = np.arange(self.n_train)
-
     self.dims = [ self.x_tra.shape[1], self.y_tra.shape[1] ]
+
+    self.val_indx = 0
+    self.tst_indx = 0
 
   def next_batch(self, size):
     if self.tra_indx == self.n_train:
@@ -112,10 +128,26 @@ class MNISTDataset(Dataset):
     return self.x_tra[:size], self.y_tra[:size]
 
   def next_validation(self, size=None):
-    return self.x_val, self.y_val
+    n_total = len(self.x_val)
+    if size is None:
+      size = n_total
+    if self.val_indx == n_total:
+      self.val_indx = 0
+    old_indx = self.val_indx
+    self.val_indx += size
+    self.val_indx = min(n_total, self.val_indx)
+    return self.x_val[old_indx:self.val_indx], self.y_val[old_indx:self.val_indx]
   
   def next_test(self, size=None):
-    return self.x_tst, self.y_tst
+    n_total = len(self.x_tst)
+    if size is None:
+      size = n_total
+    if self.tst_indx == n_total:
+      self.tst_indx = 0
+    old_indx = self.tst_indx
+    self.tst_indx += size
+    self.tst_indx = min(n_total, self.tst_indx)
+    return self.x_tst[old_indx:self.tst_indx], self.y_tst[old_indx:self.tst_indx]
 
 def all_names():
   return DATASETS.keys()

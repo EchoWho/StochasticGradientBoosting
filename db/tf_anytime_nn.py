@@ -44,65 +44,93 @@ class MNISTAnytimeNNUtils(object):
       l_preds.append(fc2)
     return l_preds
 
-class CIFARAnytimeNN2DUtils(object):
-  def __init__(self, params, dims, batch_size):
+class ImageAnytimeNN2DUtils(object):
+  def __init__(self, params, dims):
     self.params = params
     self.dims = dims
-    self.n_layers = n_layers
 
-    self.image_side = 32
-    self.crop_side = 28
-    self.channels = [ 16, 32, 64 ]
-    self.strides = [ 1, 2, 2 ]
-    self.mean_type = tf.nn.relu 
+    self.image_side = params['image_side']
+    self.image_channels = params['image_channels']
+    self.channels = params['channels'] # [ 16, 32, 64 ]
+    self.strides = params['strides']   #[ 1, 2, 2 ]
+    self.depth = len(self.channels)
+    self.width = params['width']
+    self.mean_type = params['mean_type']
+    self.init_channel = self.width * self.channels[0]
 
   def preprocess(self, x):
     # crop to 28*28
-
-    x = tf.reshape(x, [batch_size, self.image_side, self.image_side, 3])
-    x = tf.random_crop(x, [batch_size, self.crop_side, self.crop_side, 3], seed=708, name='cropped_x')
+    #print x.get_shape().as_list()
+    #x = tf.reshape(x, [-1, self.image_side, self.image_side, 3])
+    #x = tf.random_crop(x, [-1, self.crop_side, self.crop_side, 3], seed=708, name='cropped_x')
     # flip left-right
-    x = tf.image.random_flip_left_right(x)
+    #x = tf.image.random_flip_left_right(x)
     # per image mean 
-    x = tf.image.per_image_whitening(x)
+    #x = tf.image.per_image_whitening(x)
     # 3x3 conv to 16 channels
-    n_chnl = self.channels[0]
-    x = tf_conv('init_conv', tf.reshape(x, [batch_size,self.crop_side*self.crop_side*n_chnl]), [3,3,3,n_chnl], [1,1], False)
+    n_chnl = self.init_channel
+    x, x_var = tf_conv('init_conv', x, [3,3,self.image_channels,n_chnl], [1,1], False)
+    print 'preprocess', x.get_shape().as_list()
     return x
 
-  def generate_one_feature(self, prev_pred, batch_size, i, j, k):
+  def generate_one_feature(self, prev_pred, i, j, k):
     if i == 0:
-      prev_n_chnl = self.channels[0]
+      prev_n_chnl = self.init_channel
     else:
       prev_n_chnl = self.channels[i-1]
-    pred = tf_conv('conv_'+str(i)+'_'+str(j)+'_'+str(k), prev_pred, [3,3,prev_n_chnl,self.channels[i]], [self.strides[i], self.strides[i]], False)
+    pred, p_var = tf_conv('conv_'+str(i)+'_'+str(j)+'_'+str(k), prev_pred, [3,3,prev_n_chnl,self.channels[i]], [1, 1], False)
+    if self.strides[i] > 1:
+      pred = feature_to_square_image(pred, self.channels[i])
+      pred = tf.nn.max_pool(pred, ksize=[1,self.strides[i],self.strides[i],1], strides=[1,self.strides[i],self.strides[i],1], padding='SAME')
+      pred = tensor_to_feature(pred)
     return pred
 
-  def feature_grid(self, x, batch_size):
+  def feature_grid(self, x):
     ll_feats = []
     prev_l_feats = []
-    for i in range(self.params['depth']):
+    for i in range(self.depth):
       l_feats = []
-      for j in range(self.params['width']):
+      for j in range(self.width):
         if i == 0:
-          feat = self.generate_one_feature(x, batch_size, i, j)
+          feat = self.generate_one_feature(x, i, j, 0)
         else:
           feat = 0
-          for k in range(j):
-            feat += self.generate_one_feature(prev_l_feats[k], batch_size, i, j, k)
-        feat = self.mean_type(pred)
+          for k in range(j+1):
+            feat += self.generate_one_feature(prev_l_feats[k], i, j, k)
+        feat = self.mean_type(feat)
         l_feats.append(feat)
       ll_feats.append(l_feats)
       prev_l_feats = l_feats
     return ll_feats
 
-  def weak_predictions(self, x, batch_size):
-    ll_feats = self.feature_grid(x, batch_size)
-    # Option 1: inidividual output pred[i,j] = f(feat[i,j])
+  def weak_predictions(self, x):
+    ll_feats = self.feature_grid(x)
     ll_preds = []
-    for i in range(self.params['depth']):
-      f_dim = ll_feats[i][0].get_shape().as_list()[-1] 
-      ll_preds.append(map(ll_feats[i], lambda feat : tf_linear('fc', feat, [f_dim, self.dims[1]], bias=False)))
+    for depth, l_feats in enumerate(ll_feats):
+      f_dim = l_feats[0].get_shape().as_list()[-1]
+      n_channels = self.channels[depth]
+      feat_map_size = int(sqrt(f_dim / n_channels))
+      print 'prediction', depth, f_dim, n_channels, feat_map_size 
+      l_preds = []
+      for width, feat in enumerate(l_feats):
+        # avg pool hurt performance a lot may need a lot more channels for this to work
+        #feat = tf.nn.avg_pool(feature_to_square_image(feat, n_channels), 
+        #    ksize=[1, feat_map_size, feat_map_size, 1], strides=[1,1,1,1], padding='VALID')
+        #feat = tensor_to_feature(feat)
+
+        pred = tf_linear('fc_'+str(depth)+'_'+str(width), feat, [f_dim, self.dims[1]], bias=False)[0]
+        if self.params['weak_predictions'] == 'individual':
+          l_preds.append(pred)
+        elif self.params['weak_predictions'] == 'row_sum': 
+          if width == 0:
+            psum = pred
+          else:
+            psum += pred
+          l_preds.append(psum)
+        #endif params check
+      ll_preds.append(l_preds)
+      #endif for width
+    #endif for depth
 
     # Option 2: boosting: pred[i,j] = sum_{k <= j} f(feat[i,k])
 
@@ -110,8 +138,9 @@ class CIFARAnytimeNN2DUtils(object):
     return ll_preds
 
   def anytime_prediction_order(self, ll_preds):
+    # Option 1: return everything in row major ordering
+    return [ pred for l_preds in ll_preds for pred in l_preds ]
     
-    pass
 
 class AnytimeNeuralNet(object):
   def __init__(self, n_layers, dims, utils_type, loss_type, opt_type, eval_type, utils_params):
@@ -206,12 +235,13 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
   def __init__(self, dims, utils_type, loss_type, opt_type, eval_type, utils_params):
     self.dims = dims
     self.loss_type = loss_type; self.opt_type = opt_type; self.eval_type = eval_type
+    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
     self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
     self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
     self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
-    self.batch_size = tf.placeholder(tf.int32, shape=[], name='batch_size')
+    self.dropout_keep_prob = tf.placeholder(tf.float32, shape=[], name='dropout_keep_prob')
 
-    self.dataset_utils = utils_type(utils_params, dims, batch_size)
+    self.dataset_utils = utils_type(utils_params, dims)
     self.x = self.dataset_utils.preprocess(self.x_placeholder)
     self.ll_preds = self.dataset_utils.weak_predictions(self.x)
     self.anytime_preds = self.dataset_utils.anytime_prediction_order(self.ll_preds)
@@ -251,10 +281,12 @@ def main():
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
     eval_type = multi_clf_err 
-    utils_params = {'res_inter_dim': n_total_inter_dims // n_layers, 'mean_type': mean_type}
-    utils_type = MNISTAnytimeNNUtils
+    #utils_params = {'res_inter_dim': n_total_inter_dims // n_layers, 'mean_type': mean_type}
+    #utils_type = MNISTAnytimeNNUtils
+    utils_params = {'image_side':28, 'image_channels':1, 'width': 4, 'channels': [8, 16], \
+      'strides': [ 2, 2 ], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
+    utils_type = ImageAnytimeNN2DUtils
   elif dataset == 'cifar':
-    n_layers = 5
     lr = 1e-4
     dataset = get_dataset.CIFARDataset()
     dims = dataset.dims
@@ -262,12 +294,13 @@ def main():
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
     eval_type = multi_clf_err 
-    utils_params = {'res_inter_dim': 128, 'mean_type': mean_type}
-    utils_type = CIFARAnytimeNNUtils
-    print "Not implemented"
-    return -2
+    utils_params = {'image_side':32, 'image_channels':3, 'width': 4, 'channels': [4, 8, 16], \
+      'strides': [ 1, 2, 2], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
+    utils_type = ImageAnytimeNN2DUtils
 
-  ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \
+  #ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \
+  #                       opt_type, eval_type, utils_params)
+  ann = AnytimeNeuralNet2D(dims, utils_type, loss_type, \
                          opt_type, eval_type, utils_params)
 
   # Model saving paths. 
@@ -282,7 +315,7 @@ def main():
 
   # sessions and initialization
   init = tf.initialize_all_variables()
-  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.9)
   sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
   print 'Initializing...'
   sess.run(init)
@@ -292,8 +325,8 @@ def main():
   shandler = SignalHandler()
 
   # training epochs
-  batch_size = 50
-  val_interval = batch_size * 40
+  batch_size = 10
+  val_interval = batch_size * 100
   max_epoch = 100
   t = 0
   last_epoch = -1
@@ -312,27 +345,45 @@ def main():
     t += actual_batch_size
     if actual_batch_size < batch_size: t = 0;
     if t % val_interval == 0:
-      x_tra_samples, y_tra_samples = dataset.sample_training(5000)
-      preds_tra, loss_tra, last_loss_tra, eval_tra = \
-          sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
-              feed_dict=ann.fill_feed_dict(x_tra_samples, y_tra_samples, lr))
+      n_tra_eval_samples = 1000
+      n_tra_eval_batches = n_tra_eval_samples // batch_size
+      x_tra_samples, y_tra_samples = dataset.sample_training(n_tra_eval_samples)
+      l_loss_tra = []; l_last_loss_tra = []; l_eval_tra = []
+      for tra_eval_i in range(n_tra_eval_batches):
+        indx_s = tra_eval_i * batch_size
+        indx_e = indx_s + batch_size
+        preds_tra, loss_tra, last_loss_tra, eval_tra = \
+            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
+                     feed_dict=ann.fill_feed_dict(x_tra_samples[indx_s:indx_e], 
+                                                  y_tra_samples[indx_s:indx_e], lr))
+        assert(not np.isnan(loss_tra))
+        l_loss_tra.append(loss_tra); l_last_loss_tra.append(last_loss_tra); 
+        l_eval_tra.append(eval_tra)
+      loss_tra = np.mean(l_loss_tra); last_loss_tra = np.mean(l_last_loss_tra);
+      eval_tra = np.mean(l_eval_tra)
 
-      if n_layers > 1:
-        ps_losses = sess.run(ann.losses, feed_dict=ann.fill_feed_dict(x_tra_samples, y_tra_samples,lr))
-        plt.figure(1)
-        plt.clf()
-        plt.plot(np.arange(len(ps_losses)), np.log(ps_losses))
-        plt.title('log scale loss vs. learner id')
-        plt.draw()
-        plt.show(block=False)
-                                  
-      assert(not np.isnan(loss_tra))
+      ps_losses = sess.run(ann.losses, feed_dict=ann.fill_feed_dict(x_tra_samples, y_tra_samples,lr))
+      #plt.figure(1)
+      #plt.clf()
+      #plt.plot(np.arange(len(ps_losses)), np.log(ps_losses))
+      #plt.title('log scale loss vs. learner id')
+      #plt.draw()
+      #plt.show(block=False)
 
-      x_val, y_val = dataset.next_validation()
-      preds_val, loss_val, last_loss_val, eval_val = \
-          sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
-              feed_dict=ann.fill_feed_dict(x_val, y_val, lr))
-      assert(not np.isnan(loss_val))
+      n_val = 1000
+      n_val_batches = n_val // batch_size
+      l_loss_val = []; l_last_loss_val = []; l_eval_val = [] 
+      for vali in range(n_val_batches):
+        x_val, y_val = dataset.next_test(batch_size)
+        preds_val, loss_val, last_loss_val, eval_val = \
+            sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
+                     feed_dict=ann.fill_feed_dict(x_val, y_val, lr))
+        l_last_loss_val.append(last_loss_val)
+        l_loss_val.append(loss_val)
+        l_eval_val.append(eval_val)
+        assert(not np.isnan(loss_val))
+      loss_val = np.mean(l_loss_val); last_loss_val = np.mean(l_last_loss_val)
+      eval_val = np.mean(l_eval_val)
       
       print 'epoch={},t={} \n loss_val={} last_loss_val={} eval_val={}\n loss_tra={} last_loss_tra={} eval_tra={}'.format(dataset.epoch, t, loss_val, last_loss_val, eval_val, loss_tra, last_loss_tra, eval_tra)
     #ENDIF evaluation
