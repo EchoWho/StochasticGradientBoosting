@@ -12,6 +12,7 @@ import get_dataset
 import ipdb as pdb
 
 import tensorflow as tf
+import tensorflow.contrib.layers as layers
 
 
 from tf_deep_boost import *
@@ -52,6 +53,7 @@ class ImageAnytimeNN2DUtils(object):
     self.image_side = params['image_side']
     self.image_channels = params['image_channels']
     self.channels = params['channels'] # [ 16, 32, 64 ]
+    self.kernel_sizes = params['kernel_sizes']
     self.strides = params['strides']   #[ 1, 2, 2 ]
     self.depth = len(self.channels)
     self.width = params['width']
@@ -68,17 +70,25 @@ class ImageAnytimeNN2DUtils(object):
     # per image mean 
     #x = tf.image.per_image_whitening(x)
     # 3x3 conv to 16 channels
-    n_chnl = self.init_channel
-    x, x_var = tf_conv('init_conv', x, [3,3,self.image_channels,n_chnl], [1,1], False)
-    print 'preprocess', x.get_shape().as_list()
+
+    # convert to image
+    x_shape = x.get_shape().as_list()
+    if x_shape[-1] != self.image_channels:
+      x = feature_to_square_image(x, self.image_channels)
+
+    # First convolution to expand dimension
+    x = layers.convolution2d(x, num_outputs=self.init_channel, 
+      kernel_size=5, stride=1, padding='SAME', 
+      activation_fn=tf.nn.relu, normalizer_fn=batch_norm)
+    x = layers.max_pool2d(x, kernel_size=3, stride=2, padding='SAME')
     return x
 
-  def generate_one_feature(self, prev_pred, i, j, k):
+  def generate_one_feature(self, x, i, j, k):
     if i == 0:
       prev_n_chnl = self.init_channel
     else:
       prev_n_chnl = self.channels[i-1]
-    pred, p_var = tf_conv('conv_'+str(i)+'_'+str(j)+'_'+str(k), prev_pred, [3,3,prev_n_chnl,self.channels[i]], [1, 1], False)
+    pred, p_var = tf_conv('conv_'+str(i)+'_'+str(j)+'_'+str(k), x, [3,3,prev_n_chnl,self.channels[i]], [1, 1], False)
     if self.strides[i] > 1:
       pred = feature_to_square_image(pred, self.channels[i])
       pred = tf.nn.max_pool(pred, ksize=[1,self.strides[i],self.strides[i],1], strides=[1,self.strides[i],self.strides[i],1], padding='SAME')
@@ -287,15 +297,15 @@ def main():
       'strides': [ 2, 2 ], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
     utils_type = ImageAnytimeNN2DUtils
   elif dataset == 'cifar':
-    lr = 1e-4
+    lr = 1e-2
     dataset = get_dataset.CIFARDataset()
     dims = dataset.dims
     mean_type = tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
     eval_type = multi_clf_err 
-    utils_params = {'image_side':32, 'image_channels':3, 'width': 4, 'channels': [4, 8, 16], \
-      'strides': [ 1, 2, 2], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
+    utils_params = {'image_side':32, 'image_channels':3, 'width': 1, 'channels': [32, 64], \
+      'strides': [2, 2], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
     utils_type = ImageAnytimeNN2DUtils
 
   #ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \

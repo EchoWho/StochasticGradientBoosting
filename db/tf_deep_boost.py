@@ -28,6 +28,18 @@ def dataset_1d(num_pts, f, seed=None):
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 
+def feature_to_square_image(x, channels):
+  feat_dim = x.get_shape().as_list()[-1]
+  image_side = int(sqrt(feat_dim / channels))
+  return tf.reshape(x, [-1, image_side, image_side, channels])
+
+def tensor_to_feature(x):
+  dims = x.get_shape().as_list()
+  feat_dim = 1
+  for d in range(len(dims)-1):
+    feat_dim *= dims[d+1]
+  return tf.reshape(x, [-1, feat_dim])
+
 def sigmoid_clf_mean(x):
   """ Sigmoid GLM mean for classification 
   Rescales sigmoid (probability) output [0,1]->[-1,1]
@@ -90,18 +102,6 @@ def tf_bottleneck(name, l, dim, f=lambda x:x, last_transform=True):
       r2 = f(l2)
       return r2, v1+v2
     return l2, v1+v2
-
-def feature_to_square_image(x, channels):
-  feat_dim = x.get_shape().as_list()[-1]
-  image_side = int(sqrt(feat_dim / channels))
-  return tf.reshape(x, [-1, image_side, image_side, channels])
-
-def tensor_to_feature(x):
-  dims = x.get_shape().as_list()
-  feat_dim = 1
-  for d in range(len(dims)-1):
-    feat_dim *= dims[d+1]
-  return tf.reshape(x, [-1, feat_dim])
 
 def tf_conv(name, l, filter_size, stride, bias=False):
   """

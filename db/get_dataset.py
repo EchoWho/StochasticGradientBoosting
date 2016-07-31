@@ -55,7 +55,7 @@ class CIFARDataset(Dataset):
       self.x_tra_means = np.mean(self.x_tra, axis=1)[:, np.newaxis]
       self.total_samples = self.data_dict['data'].shape[0]
       self.train_order = np.arange(self.total_samples, dtype=np.int32)
-      np.random.shuffle(self.train_order)
+      #np.random.shuffle(self.train_order)
     
     old_indx = self.train_indx
     self.train_indx = min(self.train_indx + size, self.total_samples)
@@ -64,10 +64,10 @@ class CIFARDataset(Dataset):
       self.epoch += 1
     tra_indx = self.train_order[old_indx:self.train_indx]
     # return x_tra, y_tra
-    return self.x_tra[tra_indx].astype(np.float32) - self.x_tra_means[tra_indx], self.y_tra[tra_indx]
+    return self.x_tra[tra_indx].astype(np.float32), self.y_tra[tra_indx]
 
   def sample_training(self, size):
-    return self.x_tra[:size] - self.x_tra_means[:size], self.y_tra[:size]
+    return self.x_tra[:size], self.y_tra[:size]
 
   def next_validation(self, size=None):
     return self.next_test(size)
@@ -77,7 +77,7 @@ class CIFARDataset(Dataset):
       self.test_data_dict = np.load(self.loc+'/'+self.test_fn)
       self.x_test = self.test_data_dict['data'].astype(np.float32)
       self.x_test_mean = np.mean(self.x_test, axis=1)
-      self.x_test -= self.x_test_mean[:, np.newaxis].astype(np.float32)
+      #self.x_test -= self.x_test_mean[:, np.newaxis].astype(np.float32)
       self.y_test = label2onehot(self.test_data_dict['labels'],10)
       self.test_data_dict = 0
       self.test_indx = 0 
