@@ -1,4 +1,5 @@
 import numpy as np
+from tensorflow.models.image.cifar10 import cifar10_input
 
 import pdb
 
@@ -29,6 +30,39 @@ class Dataset(object):
     print "Not Implemented"
     pass
 
+class CIFARDatasetTensorflow(Dataset):
+  def __init__(self, batch_size=50, loc='/data/data/cifar/cifar10/cifar-10-batches-bin'):
+    self.loc = loc
+    self.dims = [ 24*24*3, 10 ]
+    self.epoch = 0
+    self.t = 0
+    self.total_samples = 50000
+
+    self.x_tra, self.y_tra = cifar10_input.distorted_inputs(data_dir=self.loc, batch_size=batch_size)
+    self.x_val, self.y_val = cifar10_input.inputs(eval_data=False, data_dir=self.loc, batch_size=batch_size)
+    self.x_tes, self.y_tes = cifar10_input.inputs(eval_data=True, data_dir=self.loc, batch_size=batch_size)
+
+  def reshapes(self, x_y):
+    x=x_y[0]; y=x_y[1];
+    return x.reshape([-1, self.dims[0]]), label2onehot(y, self.dims[1])
+
+  def next_batch(self, batch_size, sess):
+    self.t += batch_size
+    if self.t >= self.total_samples:
+      self.epoch += 1
+      self.t %= self.total_samples
+    return self.reshapes(sess.run([self.x_tra, self.y_tra]))
+
+  def sample_training(self, batch_size, sess):
+    return self.reshapes(sess.run([self.x_val, self.y_val]))
+    
+  def next_validation(self, batch_size):
+    pass
+    
+  def next_test(self, batch_size, sess):
+    return self.reshapes(sess.run([self.x_tes, self.y_tes]))
+    
+    
 class CIFARDataset(Dataset):
   def __init__(self, loc='/data/data/cifar/cifar10/cifar-10-batches-py'):
     Dataset.__init__(self)
@@ -50,7 +84,7 @@ class CIFARDataset(Dataset):
       self.train_indx = 0
       self.train_fn_indx = self.train_fn_indx % self.n_train_fn + 1
       self.data_dict = np.load(self.loc + '/' + self.train_fn_prefix + str(self.train_fn_indx))
-      self.x_tra = self.data_dict['data']
+      self.x_tra = self.data_dict['data'].reshape([-1,3,32,32]).transpose([0,2,3,1]).reshape([-1,3072])
       self.y_tra = label2onehot(self.data_dict['labels'], 10)
       self.x_tra_means = np.mean(self.x_tra, axis=1)[:, np.newaxis]
       self.total_samples = self.data_dict['data'].shape[0]
@@ -75,7 +109,7 @@ class CIFARDataset(Dataset):
   def next_test(self, size=None):
     if self.test_data_dict is None:
       self.test_data_dict = np.load(self.loc+'/'+self.test_fn)
-      self.x_test = self.test_data_dict['data'].astype(np.float32)
+      self.x_test = self.test_data_dict['data'].astype(np.float32).reshape([-1,3,32,32]).transpose([0,2,3,1]).reshape([-1,3072])
       self.x_test_mean = np.mean(self.x_test, axis=1)
       #self.x_test -= self.x_test_mean[:, np.newaxis].astype(np.float32)
       self.y_test = label2onehot(self.test_data_dict['labels'],10)
