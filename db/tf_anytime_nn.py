@@ -77,7 +77,8 @@ class ImageAnytimeNN2DUtils(object):
       x = layers.convolution2d(x, num_outputs=self.channels[i], 
           kernel_size=self.conv_kernel_sizes[i], stride=1, padding='SAME', 
           activation_fn=tf.nn.relu, normalizer_fn=layers.batch_norm)
-      x = layers.max_pool2d(x, kernel_size=self.pool_kernel_sizes[i], stride=2, padding='SAME')
+      if self.strides[i] > 1:
+        x = layers.max_pool2d(x, kernel_size=self.pool_kernel_sizes[i], stride=self.strides[i], padding='SAME')
     elif layer_type == 'fc':
       # ensure feature is flattened. 
       if len(x.get_shape().as_list()) > 2:
@@ -96,6 +97,22 @@ class ImageAnytimeNN2DUtils(object):
     #  pred = tensor_to_feature(pred)
     #return pred
 
+  def res_add(self, nx, px):
+    new_dims = nx.get_shape().as_list()
+    prev_dims = px.get_shape().as_list()
+    if new_dims[-1] == prev_dims[-1]:
+      return nx+px
+    elif new_dims[-1] < prev_dims[-1]:
+      # should not happen (we lost information by going to smaller channel size)
+      print "expect channel size to grow and not shrink"
+    else:
+      assert(new_dims[1] * 2 == prev_dims[1] and new_dims[2]*2 == prev_dims[2])
+      assert(new_dims[3] == prev_dims[3]*2)
+      px = layers.max_pool2d(px, kernel_size=2, stride=2, padding='SAME')
+      px = tf.concat(3, [px, tf.zeros_like(px, tf.float32)], name='res_zero_pad')
+      return nx+px
+
+
   def feature_grid(self, x):
     ll_feats = []
     prev_l_feats = []
@@ -108,6 +125,8 @@ class ImageAnytimeNN2DUtils(object):
           feat = 0
           for k in range(j+1):
             feat += self.generate_one_feature(prev_l_feats[k], i, j, k)
+          if self.params['res_add'][i]:
+            feat = self.res_add(feat, ll_feats[i-2][j])
         feat = self.mean_type(feat)
         l_feats.append(feat)
       ll_feats.append(l_feats)
@@ -307,10 +326,41 @@ def main():
     loss_type = tf.nn.softmax_cross_entropy_with_logits
     opt_type = tf.train.AdamOptimizer
     eval_type = multi_clf_err 
-    utils_params = {'image_side':24, 'image_channels':3, 'width': 1, \
-      'channels': [64, 64, 384, 192], 'layer_type': ['conv', 'conv', 'fc', 'fc'],\
-      'conv_kernel': [5, 5], 'pool_kernel': [3,3], 'strides': [2,2],\
-      'mean_type': mean_type, 'weak_predictions': 'row_sum'}
+    def build_resnet_params(n=4, init_total_channel=16, width=2):
+      channels = [] 
+      layer_type = []
+      res_add = []
+      conv_kernel = []
+      pool_kernel = []
+      strides = []
+      channel = init_total_channel / width
+      for i in range(4): # feat map size shrink 4 times.
+        for j in range(n):
+          channels.append(channel)
+          layer_type.append('conv')
+          conv_kernel.append(3)
+          res_add.append(j % 2 == 0)
+          if i > 0 and j == 0:
+            strides.append(2)
+            pool_kernel.append(2)
+          else:
+            strides.append(1)
+            pool_kernel.append(1)
+        channel *= 2
+
+      res_add[0] = False
+      return {'width': width, 'channels': channels, 'layer_type': layer_type, 
+        'res_add': res_add, 'conv_kernel': conv_kernel, 
+        'pool_kernel': pool_kernel, 'strides': strides}
+
+    utils_params = build_resnet_params()
+    utils_params.update({'image_side':24, 'image_channels':3,
+        'mean_type': mean_type, 'weak_predictions': 'row_sum'})
+    #utils_params = {'image_side':24, 'image_channels':3, 'width': 2, \
+    #  'channels': [32, 32, 192, 96], 'layer_type': ['conv', 'conv', 'fc', 'fc'],\
+    #  'res_add': [False, False, False, False],\
+    #  'conv_kernel': [5, 5], 'pool_kernel': [3,3], 'strides': [2,2],\
+    #  'mean_type': mean_type, 'weak_predictions': 'row_sum'}
     utils_type = ImageAnytimeNN2DUtils
 
   #ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \
