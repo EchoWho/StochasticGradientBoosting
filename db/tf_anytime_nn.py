@@ -47,7 +47,8 @@ class MNISTAnytimeNNUtils(object):
 
 class ImageAnytimeNN2DUtils(object):
   def __init__(self, params, dims):
-    self.params = params
+    self.params = { 'pred_sum_gamma': 1.0 }
+    self.params.update(params)
     self.dims = dims
 
     self.image_side = params['image_side']
@@ -112,7 +113,6 @@ class ImageAnytimeNN2DUtils(object):
       px = tf.concat(3, [px, tf.zeros_like(px, tf.float32)], name='res_zero_pad')
       return nx+px
 
-
   def feature_grid(self, x):
     ll_feats = []
     prev_l_feats = []
@@ -157,7 +157,29 @@ class ImageAnytimeNN2DUtils(object):
           if width == 0:
             psum = pred
           else:
-            psum += pred
+            psum = psum * self.params['pred_sum_gamma'] + pred
+          l_preds.append(psum)
+        elif self.params['weak_predictions'] == 'col_sum':
+          if depth == 0:
+            psum = pred
+          else:
+            psum = ll_preds[-1][width] * self.params['pred_sum_gamma'] + pred
+          l_preds.append(psum)
+        elif self.params['weak_predictions'] == 'box_sum':
+          if depth == 0:
+            psum = 0
+          else:
+            psum = ll_preds[-1][width]
+          if width == 0:
+            row_psum = 0
+          row_psum += pred
+          psum += row_psum
+          l_preds.append(psum)
+        elif self.params['weak_predictions'] == 'diag_sum':
+          if depth == 0 or width == len(l_feats)-1:
+            psum = pred
+          else:
+            psum = ll_preds[-1][width+1] + pred
           l_preds.append(psum)
         #endif params check
       ll_preds.append(l_preds)
@@ -170,8 +192,10 @@ class ImageAnytimeNN2DUtils(object):
     return ll_preds
 
   def anytime_prediction_order(self, ll_preds):
-    # Option 1: return everything in row major ordering
+    # Option 1: return everything in row major ordering useful for row_sum and inidividual 
     return [ pred for l_preds in ll_preds for pred in l_preds ]
+
+    # Option 2: cross diagonal 
     
 
 class AnytimeNeuralNet(object):
@@ -280,6 +304,8 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
     self.pred = self.anytime_preds[-1]
     self.losses = [ tf.reduce_mean(loss_type(apred, self.y_placeholder), name='loss'+str(ai)) for ai, apred in enumerate(self.anytime_preds) ] 
     self.loss = sum(self.losses)
+    #TODO HACK
+    #self.loss = self.losses[-1]
     
     # optimization / training
     self.optimizer = self.opt_type(self.lr)
@@ -319,12 +345,12 @@ def main():
       'strides': [ 2, 2 ], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
     utils_type = ImageAnytimeNN2DUtils
   elif dataset == 'cifar':
-    lr = 1e-2
+    lr = 1e-4
     dataset = get_dataset.CIFARDatasetTensorflow()
     dims = dataset.dims
     mean_type = tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
-    opt_type = tf.train.AdamOptimizer
+    opt_type = lambda lr : tf.train.MomentumOptimizer(lr, momentum=0.9)
     eval_type = multi_clf_err 
     def build_resnet_params(n=4, init_total_channel=16, width=2):
       channels = [] 
@@ -355,12 +381,7 @@ def main():
 
     utils_params = build_resnet_params()
     utils_params.update({'image_side':24, 'image_channels':3,
-        'mean_type': mean_type, 'weak_predictions': 'row_sum'})
-    #utils_params = {'image_side':24, 'image_channels':3, 'width': 2, \
-    #  'channels': [32, 32, 192, 96], 'layer_type': ['conv', 'conv', 'fc', 'fc'],\
-    #  'res_add': [False, False, False, False],\
-    #  'conv_kernel': [5, 5], 'pool_kernel': [3,3], 'strides': [2,2],\
-    #  'mean_type': mean_type, 'weak_predictions': 'row_sum'}
+        'mean_type': mean_type, 'weak_predictions': 'box_sum', 'pred_sum_gamma': 1.0})
     utils_type = ImageAnytimeNN2DUtils
 
   #ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \
@@ -392,7 +413,7 @@ def main():
   shandler = SignalHandler()
 
   # training epochs
-  batch_size = 50
+  batch_size = 100
   val_interval = batch_size * 100
   max_epoch = 2000
   lr_decay_step = 350
