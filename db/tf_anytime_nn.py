@@ -328,6 +328,9 @@ def main():
   #x_tra, y_tra, x_val, y_val = get_dataset.get_dataset(dataset)
   model_name_suffix = dataset
 
+  #default batch size
+  batch_size = 50
+
   # params
   if dataset == 'mnist':
     n_layers = 1 
@@ -345,12 +348,13 @@ def main():
       'strides': [ 2, 2 ], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
     utils_type = ImageAnytimeNN2DUtils
   elif dataset == 'cifar':
-    lr = 1e-4
-    dataset = get_dataset.CIFARDatasetTensorflow()
+    lr = 1e-3
+    batch_size = 50
+    dataset = get_dataset.CIFARDatasetTensorflow(batch_size=batch_size)
     dims = dataset.dims
     mean_type = tf.nn.relu
     loss_type = tf.nn.softmax_cross_entropy_with_logits
-    opt_type = lambda lr : tf.train.MomentumOptimizer(lr, momentum=0.9)
+    opt_type = tf.train.AdamOptimizer #lambda lr : tf.train.MomentumOptimizer(lr, momentum=0.9)
     eval_type = multi_clf_err 
     def build_resnet_params(n=4, init_total_channel=16, width=2):
       channels = [] 
@@ -401,7 +405,7 @@ def main():
 
   # sessions and initialization
   init = tf.initialize_all_variables()
-  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.9)
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
   sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
   print 'Initializing...'
   sess.run(init)
@@ -413,7 +417,6 @@ def main():
   shandler = SignalHandler()
 
   # training epochs
-  batch_size = 100
   val_interval = batch_size * 100
   max_epoch = 2000
   lr_decay_step = 350
