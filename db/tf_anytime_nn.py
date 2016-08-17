@@ -46,7 +46,7 @@ class MNISTAnytimeNNUtils(object):
     return l_preds
 
 class ImageAnytimeNN2DUtils(object):
-  def __init__(self, params, dims):
+  def __init__(self, params, dims, kp=1.0):
     self.params = { 'pred_sum_gamma': 1.0 }
     self.params.update(params)
     self.dims = dims
@@ -61,6 +61,9 @@ class ImageAnytimeNN2DUtils(object):
     self.width = params['width']
     self.mean_type = params['mean_type']
     self.init_channel = self.width * self.channels[0]
+
+    self.dropout_weights = tf.ones([self.depth], name='ones_dropout_weight')
+    self.dropout_flag = tf.nn.dropout(self.dropout_weights, kp, name='dropout_weight')
 
   def preprocess(self, x):
     x_shape = x.get_shape().as_list()
@@ -126,7 +129,7 @@ class ImageAnytimeNN2DUtils(object):
           for k in range(j+1):
             feat += self.generate_one_feature(prev_l_feats[k], i, j, k)
           if self.params['res_add'][i]:
-            feat = self.res_add(feat, ll_feats[i-2][j])
+            feat = self.res_add(feat*self.dropout_flag[i-2], ll_feats[i-2][j])
         feat = self.mean_type(feat)
         l_feats.append(feat)
       ll_feats.append(l_feats)
@@ -191,12 +194,14 @@ class ImageAnytimeNN2DUtils(object):
     # Option 3: current row as feature: pred[i,j] = f( sum_{k<=j} w[k] * feat[i,k] )
     return ll_preds
 
-  def anytime_prediction_order(self, ll_preds):
+  def anytime_predictions_and_losses(self, ll_preds, loss_type, y_gt):
     # Option 1: return everything in row major ordering useful for row_sum and inidividual 
-    return [ pred for l_preds in ll_preds for pred in l_preds ]
+    preds = [ pred for l_preds in ll_preds for pred in l_preds ]
+    losses = [ tf.reduce_mean(loss_type(pred, y_gt)) for di, l_preds in enumerate(ll_preds) for pred in l_preds ]
+    return preds, losses
 
     # Option 2: cross diagonal 
-    
+
 
 class AnytimeNeuralNet(object):
   def __init__(self, n_layers, dims, utils_type, loss_type, opt_type, eval_type, utils_params):
@@ -297,15 +302,12 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
     self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
     self.dropout_keep_prob = tf.placeholder(tf.float32, shape=[], name='dropout_keep_prob')
 
-    self.dataset_utils = utils_type(utils_params, dims)
+    self.dataset_utils = utils_type(utils_params, dims, self.dropout_keep_prob)
     self.x = self.dataset_utils.preprocess(self.x_placeholder)
     self.ll_preds = self.dataset_utils.weak_predictions(self.x)
-    self.anytime_preds = self.dataset_utils.anytime_prediction_order(self.ll_preds)
+    self.anytime_preds, self.losses = self.dataset_utils.anytime_predictions_and_losses(self.ll_preds, loss_type, self.y_placeholder)
     self.pred = self.anytime_preds[-1]
-    self.losses = [ tf.reduce_mean(loss_type(apred, self.y_placeholder), name='loss'+str(ai)) for ai, apred in enumerate(self.anytime_preds) ] 
     self.loss = sum(self.losses)
-    #TODO HACK
-    #self.loss = self.losses[-1]
     
     # optimization / training
     self.optimizer = self.opt_type(self.lr)
@@ -385,7 +387,7 @@ def main():
 
     utils_params = build_resnet_params()
     utils_params.update({'image_side':24, 'image_channels':3,
-        'mean_type': mean_type, 'weak_predictions': 'box_sum', 'pred_sum_gamma': 1.0})
+        'mean_type': mean_type, 'weak_predictions': 'row_sum', 'pred_sum_gamma': 1.0})
     utils_type = ImageAnytimeNN2DUtils
 
   #ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \
@@ -417,7 +419,7 @@ def main():
   shandler = SignalHandler()
 
   # training epochs
-  val_interval = batch_size * 100
+  val_interval = 24000
   max_epoch = 2000
   lr_decay_step = 350
   lr_decay_gamma = 0.1
@@ -434,7 +436,7 @@ def main():
     x, y = dataset.next_batch(batch_size,sess)
     actual_batch_size = x.shape[0]
 
-    sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=0.5))
+    sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=0.7))
       
     # Evaluate
     t += actual_batch_size
@@ -466,7 +468,7 @@ def main():
       #plt.draw()
       #plt.show(block=False)
 
-      n_val = 1000
+      n_val = 5000
       n_val_batches = n_val // batch_size
       l_loss_val = []; l_last_loss_val = []; l_eval_val = [] 
       for vali in range(n_val_batches):
