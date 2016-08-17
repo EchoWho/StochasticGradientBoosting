@@ -12,14 +12,16 @@
 # Select a menu item: 1
 #
 # Arun Venkatraman (09-24-2015)
-# 
+#
 
-HEADER_LEADER = '----- '; 
-HEADER_TRAILER = ' -----';
+HEADER_LEADER = '----- '
+HEADER_TRAILER = ' -----'
+
+
 def textmenu(items_or_globstr, header="MENU", prompt="Select a menu item:"):
     print("\n" + HEADER_LEADER + header + HEADER_TRAILER + "\n")
     # convert to list if just a string
-    if isinstance(items_or_globstr, str): 
+    if isinstance(items_or_globstr, str):
         import glob
         items = glob.glob(items_or_globstr)
     else:
@@ -29,8 +31,7 @@ def textmenu(items_or_globstr, header="MENU", prompt="Select a menu item:"):
         print("{0:d}: {1:s}".format(i, str(item)))
     print("\n")
 
-
-    choice = raw_input(prompt + " ");
+    choice = raw_input(prompt + " ")
 
     try:
         choice = int(choice)

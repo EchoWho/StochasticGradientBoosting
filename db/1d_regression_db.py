@@ -11,42 +11,54 @@ from timer import Timer
 
 
 from collections import namedtuple
-DataPt = namedtuple('DataPt', ['x','y'])
+DataPt = namedtuple('DataPt', ['x', 'y'])
 
 from IPython import embed
 
 FEATURE_DIM = 1
 MAX_X = 5
+
+
 def f(x):
-    #return 0.25*x
-    #return 1e-2*x*x  + 5.00*x
-    #return 1e0*x*x  + 5.00*x
-    return 8.*cos(x) + 2.5*x*sin(x) + 2.8*x
+    # return 0.25*x
+    # return 1e-2*x*x  + 5.00*x
+    # return 1e0*x*x  + 5.00*x
+    return 8. * cos(x) + 2.5 * x * sin(x) + 2.8 * x
 
 # dataset generator function
+
+
 def dataset(num_pts, seed=0):
     np.random.seed(seed)
     for _ in xrange(num_pts):
-        x = -MAX_X+2.*MAX_X*np.random.rand(1)[0]
+        x = -MAX_X + 2. * MAX_X * np.random.rand(1)[0]
         y = f(x)
-        yield DataPt(x,y)
+        yield DataPt(x, y)
 
 # from sgd_fast sklearn source
+
+
 class SquaredLoss(object):
     """Squared loss traditional used in linear regression."""
+
     def loss(self, p, y):
         return 0.5 * (p - y) * (p - y)
+
     def dloss(self, p, y):
         """ p is the prediction, y is the true value"""
         return p - y
 
+
 class EpsilonInsensitive(object):
     """Epsilon-Insensitive loss (used by SVR).  loss = max(0, |y - p| - epsilon) """
+
     def __init__(self, epsilon):
         self.epsilon = epsilon
+
     def loss(self, p, y):
         ret = abs(y - p) - self.epsilon
         return ret if ret > 0 else 0
+
     def dloss(self, p, y):
         if y - p > self.epsilon:
             return -1.
@@ -58,50 +70,62 @@ class EpsilonInsensitive(object):
 SqLoss = SquaredLoss()
 EpsInsensitive = EpsilonInsensitive(1e-2)
 
+
 def linear_features(w, x):
     return w.dot(x)
+
+
 def square_features(w, x):
-    return w.dot(x*x)
+    return w.dot(x * x)
+
 
 def threshold_func(w, x, thresh):
     return w.dot(x > thresh)
 
+
 class Node(object):
-    def __init__(self, loss_obj, parent=None, name="NoName", input_dim = 0,
-            predict_func=None):
+
+    def __init__(self, loss_obj, parent=None, name="NoName", input_dim=0,
+                 predict_func=None):
         self.parent = parent
         self.name = name
         self.loss_obj = loss_obj
         self.w = np.zeros(input_dim)
         if predict_func is None:
-            self.predict_func = partial(threshold_func, thresh=-(1.1*MAX_X)+2.*(1.1*MAX_X)*np.random.rand(1))
+            self.predict_func = partial(threshold_func, thresh=-(1.1 * MAX_X) + 2. * (1.1 * MAX_X) * np.random.rand(1))
+
     def predict(self, x):
         return self.predict_func(self.w, x)
+
     def dloss(self, val, true_val):
         # need to compute the gradient wrt parent also
         if self.parent is None:
             return self.loss_obj.dloss(val, true_val)
         else:
             # children nodes want to predict the -gradient of the parent
-            #return self.loss_obj.dloss(val, -self.parent.dloss(val, true_val))
+            # return self.loss_obj.dloss(val, -self.parent.dloss(val, true_val))
             return self.parent.dloss(val, true_val)
+
     def loss(self, val, true_val):
         return self.loss_obj.loss(val, true_val)
+
     def grad_step(self, x, loss, step_size):
         pred = partial(self.predict_func, x=x)
         param_grad_func = nd.Derivative(pred)
         grad = param_grad_func(self.w)
-        self.w = self.w - step_size*grad*loss
+        self.w = self.w - step_size * grad * loss
         return self.w
+
 
 def compute_running_average(nodes, predictions):
     num_nodes = len(nodes)
-    weights = [2./(i+1.) for i in xrange(1, num_nodes+1)]
-    partial_sums = np.zeros(num_nodes) 
+    weights = [2. / (i + 1.) for i in xrange(1, num_nodes + 1)]
+    partial_sums = np.zeros(num_nodes)
     partial_sums[0] = predictions[0]
-    for i in xrange(1,num_nodes):
-        partial_sums[i] = (1.-weights[i]) * partial_sums[i-1] + weights[i]*predictions[i]
+    for i in xrange(1, num_nodes):
+        partial_sums[i] = (1. - weights[i]) * partial_sums[i - 1] + weights[i] * predictions[i]
     return partial_sums
+
 
 def predict_layer(pt, child_nodes, top_node):
     """
@@ -116,33 +140,33 @@ def predict_layer(pt, child_nodes, top_node):
     top_loss = top_node.loss(partial_sums[-1], pt.y)
     return partial_sums, top_loss
 
-def main(num_pts, num_children, learning_rate=1.5, learning_scale = 0.8, rand_seed=0):
-    top_node= Node(SqLoss, parent=None, name="root", input_dim = 0)
-    child_nodes= [Node(SqLoss, parent=top_node, input_dim = FEATURE_DIM, name='Child {:d}'.format(i))\
-            for i in xrange(num_children)]
+
+def main(num_pts, num_children, learning_rate=1.5, learning_scale=0.8, rand_seed=0):
+    top_node = Node(SqLoss, parent=None, name="root", input_dim=0)
+    child_nodes = [Node(SqLoss, parent=top_node, input_dim=FEATURE_DIM, name='Child {:d}'.format(i))
+                   for i in xrange(num_children)]
     #child_nodes = []
-    #for i in xrange(num_children):
+    # for i in xrange(num_children):
     #    func = linear_features
     #    if i % 2 == 0:
-    #        func = square_features 
+    #        func = square_features
     #    child_nodes.append(Node(None, parent=top_node, input_dim=FEATURE_DIM, predict_func=func,
-    #        name='Child {:d}'.format(i))) 
-        
-    validation_set = [pt for pt in dataset(500, seed=rand_seed+1)]
+    #        name='Child {:d}'.format(i)))
+
+    validation_set = [pt for pt in dataset(500, seed=rand_seed + 1)]
 
     batch_set = [pt for pt in dataset(num_pts, seed=rand_seed)]
     from sklearn.linear_model.ridge import Ridge
-    batch_learner = Ridge(alpha=1e-15, fit_intercept=False) 
+    batch_learner = Ridge(alpha=1e-15, fit_intercept=False)
     batch_learner.fit(np.vstack([pt.x for pt in batch_set]), np.array([pt.y for pt in batch_set]))
     batch_pred = batch_learner.predict(np.vstack([pt.x for pt in validation_set]))
     Yval = np.array([pt.y for pt in validation_set])
     # THIS HAS TO BE THE SAME LOSS AS THE TOP NODE!
-    mean_batch_err = np.mean([top_node.loss(pred, val) for (pred,val) in zip(batch_pred, Yval)]) 
+    mean_batch_err = np.mean([top_node.loss(pred, val) for (pred, val) in zip(batch_pred, Yval)])
     #err = batch_pred - Yval; mean_batch_err = np.mean(0.5*err*err)
     print('Batch err: {:.4g}'.format(mean_batch_err))
 
-
-    npprint = partial(np.array_str, precision = 3)
+    npprint = partial(np.array_str, precision=3)
 
     multiprocess = num_children >= 75
     if multiprocess:
@@ -158,65 +182,70 @@ def main(num_pts, num_children, learning_rate=1.5, learning_scale = 0.8, rand_se
         print('Child learner weights: {}'.format(npprint(learner_weights.ravel())))
 
     validation_preds = []
-    per_iter_learner_weights =  []
+    per_iter_learner_weights = []
     print 'Starting Online Boosting...'
-    for i,pt in enumerate(dataset(num_pts, seed=rand_seed)):
+    for i, pt in enumerate(dataset(num_pts, seed=rand_seed)):
         per_iter_learner_weights.append(learner_weights)
         # Compute loss on Validation set
         if multiprocess:
-            val_results = p.map(val_helper, validation_set); 
+            val_results = p.map(val_helper, validation_set)
         else:
             val_results = [predict_layer(val_pt, child_nodes, top_node) for val_pt in validation_set]
-        val_psums, val_losses = zip(*val_results); 
-        val_preds = [psum[-1] for psum in val_psums]; validation_preds.append(val_preds)
+        val_psums, val_losses = zip(*val_results)
+        val_preds = [psum[-1] for psum in val_psums]
+        validation_preds.append(val_preds)
         avg_val_loss = np.mean(val_losses)
-        # Compute the partial sums, loss on current data point 
+        # Compute the partial sums, loss on current data point
         partial_sums, top_loss = predict_layer(pt, child_nodes, top_node)
 
         # get the gradient of the top loss at each partial sum
-        true_val = pt.y 
+        true_val = pt.y
         offset_partials = partial_sums.copy()
         offset_partials[1:] = partial_sums[:-1]
         offset_partials[0] = 0
-        dlosses = [node.dloss(pred_val, true_val) for pred_val,node in zip(offset_partials, child_nodes)]
-        step_size = learning_scale/np.power((i+1), learning_rate)
-        learner_weights = np.array([node.grad_step(pt.x, loss, step_size)\
-                for (node, loss) in zip(child_nodes, dlosses)])
-        if  i < 1 or i == num_pts-1 or (i < num_children and num_children < disp_num_child)\
-                or i % min(int(ceil(num_pts*0.05)),25) == 0 or avg_val_loss > 1e3:
-            print('Iteration {:d}/{:d}: (x={:.2g},y={:.2g})'.format(i+1, num_pts, pt.x, pt.y))
+        dlosses = [node.dloss(pred_val, true_val) for pred_val, node in zip(offset_partials, child_nodes)]
+        step_size = learning_scale / np.power((i + 1), learning_rate)
+        learner_weights = np.array([node.grad_step(pt.x, loss, step_size)
+                                    for (node, loss) in zip(child_nodes, dlosses)])
+        if  i < 1 or i == num_pts - 1 or (i < num_children and num_children < disp_num_child)\
+                or i % min(int(ceil(num_pts * 0.05)), 25) == 0 or avg_val_loss > 1e3:
+            print('Iteration {:d}/{:d}: (x={:.2g},y={:.2g})'.format(i + 1, num_pts, pt.x, pt.y))
             print(' Avg validation loss on pt: {:.4g} vs Batch: {:.4g}'.format(avg_val_loss,
-                mean_batch_err))
+                                                                               mean_batch_err))
             print('  Top layer loss on pt: {:.4g}'.format(top_loss))
             if num_children < disp_num_child:
                 print('  Child learner weights: {}'.format(npprint(learner_weights.ravel())))
                 print('  Partial sums: {}'.format(npprint(partial_sums)))
             print('  Took descent step of step size {:.4g}...'.format(step_size))
-    #endfor
+    # endfor
 
     return validation_set, validation_preds, batch_pred, batch_set, per_iter_learner_weights
 
 
-def plot_per_iter_results(validation_pts, validation_preds, batch_set, batch_pred, learner_weights ):
-    import time,os
+def plot_per_iter_results(validation_pts, validation_preds, batch_set, batch_pred, learner_weights):
+    import time
+    import os
     num_iters = len(validation_preds)
 
     val_x = np.array([pt.x for pt in validation_pts])
     val_y = np.array([pt.y for pt in validation_pts])
 
-    pred_base_outdir = os.path.join(os.path.split(__file__)[0], '../predict_func') 
+    pred_base_outdir = os.path.join(os.path.split(__file__)[0], '../predict_func')
     if not os.path.isdir(pred_base_outdir):
         os.mkdir(pred_base_outdir)
 
     y_lims = [min(np.min(val_y), np.min(validation_preds)), max(np.max(val_y), np.max(validation_preds))]
     x_lims = [np.min(val_x), np.max(val_x)]
-    axis_lims = list(x_lims); axis_lims.extend(y_lims)   
-    axis_lims[0] = axis_lims[0]-0.05*abs(axis_lims[0]); axis_lims[2] = axis_lims[2]-0.05*abs(axis_lims[2]);
-    axis_lims[1] = axis_lims[1]+0.05*abs(axis_lims[1]); axis_lims[3] = axis_lims[3]+0.05*abs(axis_lims[3]);
+    axis_lims = list(x_lims)
+    axis_lims.extend(y_lims)
+    axis_lims[0] = axis_lims[0] - 0.05 * abs(axis_lims[0])
+    axis_lims[2] = axis_lims[2] - 0.05 * abs(axis_lims[2])
+    axis_lims[1] = axis_lims[1] + 0.05 * abs(axis_lims[1])
+    axis_lims[3] = axis_lims[3] + 0.05 * abs(axis_lims[3])
 
     val_sort = np.argsort(val_x)
     for i in xrange(num_iters):
-        print('Drawing frame {}/{}'.format(i+1, num_iters))
+        print('Drawing frame {}/{}'.format(i + 1, num_iters))
         plt.figure(1)
         plt.clf()
         plt.plot(val_x[val_sort], val_y[val_sort], label='Ground Truth', linewidth=3)
@@ -224,16 +253,17 @@ def plot_per_iter_results(validation_pts, validation_preds, batch_set, batch_pre
         plt.plot(val_x[val_sort], np.array(validation_preds[i])[val_sort], linewidth=1.5, label='Online Boosting')
         if i > 0:
             plt.plot(batch_set[i].x, batch_set[i].y, 's', markersize=8, linewidth=1.5, label='Point Recieved')
-        plt.xlabel('X', fontsize=12); plt.ylabel('Y', fontsize=12)
+        plt.xlabel('X', fontsize=12)
+        plt.ylabel('Y', fontsize=12)
         plt.title('Data Pt. {}/{}'.format(i, num_iters), fontsize=12)
-        plt.legend(loc=2,fontsize=12)
+        plt.legend(loc=2, fontsize=12)
         plt.axis(axis_lims)
         out_fname = os.path.join(pred_base_outdir, 'frame{:03d}.png'.format(i))
         plt.savefig(out_fname, format='png')
-    #endfor
+    # endfor
     print('Saved out: {}'.format(out_fname))
 
-    learner_out_dir = os.path.join(os.path.split(__file__)[0], '../') 
+    learner_out_dir = os.path.join(os.path.split(__file__)[0], '../')
     num_learners = len(learner_weights[0])
     plt.figure(2)
     plt.clf()
@@ -247,7 +277,7 @@ def plot_per_iter_results(validation_pts, validation_preds, batch_set, batch_pre
     out_fname = os.path.join(learner_out_dir, 'LearnerWeightVsTime.pdf')
     plt.savefig(out_fname, format='pdf')
     print('Saved out: {}'.format(out_fname))
-        
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser("1d Online Gradient Boosting")
@@ -256,14 +286,18 @@ if __name__ == "__main__":
     parser.add_argument('-l', '--learning_rate', default=3.0, help='eta in step_size = s * 1/(i+1)^eta')
     parser.add_argument('-ls', '--learning_scale', default=0.8, help='s in step_size = s * 1/(i+1)^eta')
     parser.add_argument('-r', '--rand_seed', default=0, help='random seed for data gen')
-    parser.add_argument('-s', '--save', action='store_true', help='save frames of predictions versus time, learner weights vs time')
+    parser.add_argument(
+        '-s',
+        '--save',
+        action='store_true',
+        help='save frames of predictions versus time, learner weights vs time')
     args = parser.parse_args()
-    num_pts     = int(args.num_pts)
-    num_child   = int(args.num_children)
-    rand_seed   = int(args.rand_seed)
+    num_pts = int(args.num_pts)
+    num_child = int(args.num_children)
+    rand_seed = int(args.rand_seed)
     learning_rate = float(args.learning_rate)
     learning_scale = float(args.learning_scale)
-    validation_pts, validation_preds, batch_pred, batch_set, learner_weights = main(num_pts, num_child, 
-            learning_rate, learning_scale, rand_seed)
+    validation_pts, validation_preds, batch_pred, batch_set, learner_weights = main(num_pts, num_child,
+                                                                                    learning_rate, learning_scale, rand_seed)
     if args.save:
         plot_per_iter_results(validation_pts, validation_preds, batch_set, batch_pred, learner_weights)
