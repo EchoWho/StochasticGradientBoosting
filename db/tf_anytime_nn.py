@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from math import ceil, floor, sqrt, cos, sin
 import os
+import sys
 import signal
 from timer import Timer
 import get_dataset
@@ -18,6 +19,10 @@ import tensorflow.contrib.layers as layers
 
 from tf_deep_boost import *
 from signal_handler import *
+
+def print_sameline(text):
+    sys.stdout.write('{}\r'.format(text))
+    sys.stdout.flush()
 
 
 class MNISTAnytimeNNUtils(object):
@@ -134,7 +139,7 @@ class ImageAnytimeNN2DUtils(object):
                     for k in range(j + 1):
                         feat += self.generate_one_feature(prev_l_feats[k], i, j, k)
                     if self.params['res_add'][i]:
-                        feat = self.res_add(feat * self.dropout_flag[i - 2], ll_feats[i - 2][j])
+                        feat = self.res_add(feat * self.dropout_flag[i], ll_feats[i - 2][j])
                 feat = self.mean_type(feat)
                 l_feats.append(feat)
             ll_feats.append(l_feats)
@@ -145,17 +150,12 @@ class ImageAnytimeNN2DUtils(object):
         ll_feats = self.feature_grid(x)
         ll_preds = []
         for depth, l_feats in enumerate(ll_feats):
-            #f_dim = l_feats[0].get_shape().as_list()[-1]
-            #n_channels = self.channels[depth]
-            #feat_map_size = int(sqrt(f_dim / n_channels))
-            # print 'prediction', depth, f_dim, n_channels, feat_map_size
             l_preds = []
             for width, feat in enumerate(l_feats):
-                # avg pool hurt performance a lot may need a lot more channels for this to work
-                # feat = tf.nn.avg_pool(feature_to_square_image(feat, n_channels),
-                #    ksize=[1, feat_map_size, feat_map_size, 1], strides=[1,1,1,1], padding='VALID')
-                #feat = tensor_to_feature(feat)
                 if len(feat.get_shape().as_list()) > 2:
+                    feat_map_size = feat.get_shape().as_list()[1]
+                    feat = tf.nn.avg_pool(feat,
+                        ksize=[1, feat_map_size, feat_map_size, 1], strides=[1,1,1,1], padding='VALID')
                     feat = tensor_to_feature(feat)
                 f_dim = feat.get_shape().as_list()[-1]
                 pred = tf_linear('fc_' + str(depth) + '_' + str(width), feat, [f_dim, self.dims[1]], bias=False)[0]
@@ -195,17 +195,12 @@ class ImageAnytimeNN2DUtils(object):
         # endif for depth
 
         # Option 2: boosting: pred[i,j] = sum_{k <= j} f(feat[i,k])
-
-        # Option 3: current row as feature: pred[i,j] = f( sum_{k<=j} w[k] * feat[i,k] )
         return ll_preds
 
     def anytime_predictions_and_losses(self, ll_preds, loss_type, y_gt):
-        # Option 1: return everything in row major ordering useful for row_sum and inidividual
         preds = [pred for l_preds in ll_preds for pred in l_preds]
-        losses = [tf.reduce_mean(loss_type(pred, y_gt)) for di, l_preds in enumerate(ll_preds) for pred in l_preds]
+        losses = [tf.reduce_mean(loss_type(pred, y_gt)) for pred in preds]
         return preds, losses
-
-        # Option 2: cross diagonal
 
 
 class AnytimeNeuralNet(object):
@@ -320,11 +315,23 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
         self.anytime_preds, self.losses = self.dataset_utils.anytime_predictions_and_losses(
             self.ll_preds, loss_type, self.y_placeholder)
         self.pred = self.anytime_preds[-1]
-        self.loss = sum(self.losses)
 
+        # Generate a single loss using sum of losses.
+        self.loss = sum(self.losses)
         # optimization / training
         self.optimizer = self.opt_type(self.lr)
         self.train_op = self.optimizer.minimize(self.loss)
+
+        # Generate a loss for each prediction. 
+        self.l_optimizers = [ self.opt_type(self.lr) for _ in self.anytime_preds ]
+        self.l_train_ops = [ self.l_optimizers[i].minimize(loss) for i, loss in enumerate(self.losses) ]
+        BASE_PROB = 0.3
+        MAX_PROB = 1.0
+        PROB_STEP = (MAX_PROB - BASE_PROB) / (len(self.losses) - 1)
+        # Note that the last one is not included and it will always be picked by sample_train_ops
+        self.l_train_op_probs = np.arange(BASE_PROB, MAX_PROB, PROB_STEP)
+        self.l_train_op_probs /= np.sum(self.l_train_op_probs)
+        self.l_train_op_probs = np.cumsum(self.l_train_op_probs)
 
         self.eval_result = self.loss
         if self.eval_type is not None:
@@ -332,6 +339,10 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
 
         self.saver = tf.train.Saver()
 
+    def training(self):
+        p = np.random.uniform(0,1)
+        indx = np.searchsorted(self.l_train_op_probs, p)
+        return [ self.l_train_ops[indx], self.l_train_ops[-1] ]
 
 def main():
     # ------------- Dataset -------------
@@ -364,8 +375,8 @@ def main():
                         'strides': [2, 2], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
         utils_type = ImageAnytimeNN2DUtils
     elif dataset == 'cifar':
-        lr = 1e-3
-        batch_size = 50
+        lr = 1e-1
+        batch_size = 128
         dataset = get_dataset.CIFARDatasetTensorflow(batch_size=batch_size)
         dims = dataset.dims
         mean_type = tf.nn.relu
@@ -435,10 +446,14 @@ def main():
     # training epochs
     val_interval = 24000
     max_epoch = 2000
-    lr_decay_step = 350
+    lr_decay_step = 100
     lr_decay_gamma = 0.1
     t = 0
     last_epoch = -1
+
+    # load saved_model HACK/TODO
+    #restore_model_path = '../model/best_model_cifar.ckpt'
+    #ann.saver.restore(sess, restore_model_path)
     while dataset.epoch < max_epoch:
         if last_epoch != dataset.epoch:
             print("-----Epoch {:d}-----".format(dataset.epoch))
@@ -450,34 +465,33 @@ def main():
         x, y = dataset.next_batch(batch_size, sess)
         actual_batch_size = x.shape[0]
 
-        sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=0.7))
+        print_sameline('\n...epoch={},t={}'.format(dataset.epoch, t))
+        sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=1.0))
 
         # Evaluate
         t += actual_batch_size
         if actual_batch_size < batch_size:
             t = 0
-        if t % val_interval == 0:
-            n_tra_eval_samples = 1000
-            n_tra_eval_batches = n_tra_eval_samples // batch_size
-            #x_tra_samples, y_tra_samples = dataset.sample_training(n_tra_eval_samples)
-            l_loss_tra = []
-            l_last_loss_tra = []
-            l_eval_tra = []
-            for tra_eval_i in range(n_tra_eval_batches):
-                #indx_s = tra_eval_i * batch_size
-                #indx_e = indx_s + batch_size
-                x_tra_samples, y_tra_samples = dataset.sample_training(batch_size, sess)
-                preds_tra, loss_tra, last_loss_tra, eval_tra = \
-                    sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
-                             feed_dict=ann.fill_feed_dict(x_tra_samples,  # [indx_s:indx_e],
-                                                          y_tra_samples, lr))  # [indx_s:indx_e], lr))
-                assert(not np.isnan(loss_tra))
-                l_loss_tra.append(loss_tra)
-                l_last_loss_tra.append(last_loss_tra)
-                l_eval_tra.append(eval_tra)
-            loss_tra = np.mean(l_loss_tra)
-            last_loss_tra = np.mean(l_last_loss_tra)
-            eval_tra = np.mean(l_eval_tra)
+        if t % val_interval == 0 or (dataset.epoch == 0 and t == actual_batch_size and restore_model_path is not None):
+            print '\n'
+            #n_tra_eval_samples = 1000
+            #n_tra_eval_batches = n_tra_eval_samples // batch_size
+            ##x_tra_samples, y_tra_samples = dataset.sample_training(n_tra_eval_samples)
+            #l_last_loss_tra = []
+            #l_eval_tra = []
+            #for tra_eval_i in range(n_tra_eval_batches):
+            #    #indx_s = tra_eval_i * batch_size
+            #    #indx_e = indx_s + batch_size
+            #    x_tra_samples, y_tra_samples = dataset.sample_training(batch_size, sess)
+            #    last_loss_tra, eval_tra = \
+            #        sess.run([ann.last_loss(), ann.evaluation()],
+            #                 feed_dict=ann.fill_feed_dict(x_tra_samples,  # [indx_s:indx_e],
+            #                                              y_tra_samples, lr))  # [indx_s:indx_e], lr))
+            #    assert(not np.isnan(last_loss_tra))
+            #    l_last_loss_tra.append(last_loss_tra)
+            #    l_eval_tra.append(eval_tra)
+            #last_loss_tra = np.mean(l_last_loss_tra)
+            #eval_tra = np.mean(l_eval_tra)
 
             #ps_losses = sess.run(ann.losses, feed_dict=ann.fill_feed_dict(x_tra_samples, y_tra_samples,lr))
             # plt.figure(1)
@@ -490,22 +504,24 @@ def main():
             n_val = 5000
             n_val_batches = n_val // batch_size
             l_loss_val = []
-            l_last_loss_val = []
             l_eval_val = []
             for vali in range(n_val_batches):
                 x_val, y_val = dataset.next_test(batch_size, sess)
-                preds_val, loss_val, last_loss_val, eval_val = \
-                    sess.run([ann.inference(), ann.optimization_loss(), ann.last_loss(), ann.evaluation()],
+                run_ret = sess.run(ann.losses + [ann.evaluation()],
                              feed_dict=ann.fill_feed_dict(x_val, y_val, lr))
-                l_last_loss_val.append(last_loss_val)
-                l_loss_val.append(loss_val)
-                l_eval_val.append(eval_val)
-                assert(not np.isnan(loss_val))
-            loss_val = np.mean(l_loss_val)
-            last_loss_val = np.mean(l_last_loss_val)
-            eval_val = np.mean(l_eval_val)
+                losses = run_ret[:-1] 
+                eval_val = run_ret[-1]
 
-            print 'epoch={},t={} \n loss_val={} last_loss_val={} eval_val={}\n loss_tra={} last_loss_tra={} eval_tra={}'.format(dataset.epoch, t, loss_val, last_loss_val, eval_val, loss_tra, last_loss_tra, eval_tra)
+                assert(not np.isnan(losses[-1]))
+                l_loss_val.append(losses)
+                l_eval_val.append(eval_val)
+            eval_val = np.mean(l_eval_val)
+            losses_val = np.mean(np.array(l_loss_val), axis=0)
+
+            
+            print 'epoch={},t={} \n eval_val={}, losses:'.format(dataset.epoch, t, eval_val)
+            print losses_val
+            #print 'last_loss_tra={} eval_tra={}\n'.format(last_loss_tra, eval_tra)
         # ENDIF evaluation
         if shandler.captured():
             print("----------------------")
