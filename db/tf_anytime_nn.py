@@ -452,11 +452,12 @@ def main():
     last_epoch = -1
 
     # load saved_model HACK/TODO
+    restore_model_path = None
     #restore_model_path = '../model/best_model_cifar.ckpt'
     #ann.saver.restore(sess, restore_model_path)
     while dataset.epoch < max_epoch:
         if last_epoch != dataset.epoch:
-            print("-----Epoch {:d}-----".format(dataset.epoch))
+            print("-----Epoch {:d}-----\n".format(dataset.epoch))
             last_epoch = dataset.epoch
             t = 0
             if dataset.epoch > 0 and dataset.epoch % lr_decay_step == 0:
@@ -465,7 +466,7 @@ def main():
         x, y = dataset.next_batch(batch_size, sess)
         actual_batch_size = x.shape[0]
 
-        print_sameline('\n...epoch={},t={}'.format(dataset.epoch, t))
+        print_sameline('...epoch={},t={}'.format(dataset.epoch, t))
         sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=1.0))
 
         # Evaluate
