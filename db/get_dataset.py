@@ -1,5 +1,6 @@
 import numpy as np
-from tensorflow.models.image.cifar10 import cifar10_input
+#from tensorflow.models.image.cifar10 import cifar10_input
+import get_cifar10_dataset as cifar10_input
 
 import pdb
 
@@ -38,7 +39,8 @@ class CIFARDatasetTensorflow(Dataset):
 
     def __init__(self, batch_size=50, loc='/data/data/cifar/cifar10/cifar-10-batches-bin'):
         self.loc = loc
-        self.dims = [24 * 24 * 3, 10]
+        img_size = cifar10_input.IMAGE_SIZE
+        self.dims = [img_size * img_size * 3, 10]
         self.epoch = 0
         self.t = 0
         self.total_samples = 50000

@@ -316,12 +316,6 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
             self.ll_preds, loss_type, self.y_placeholder)
         self.pred = self.anytime_preds[-1]
 
-        # Generate a single loss using sum of losses.
-        self.loss = sum(self.losses)
-        # optimization / training
-        self.optimizer = self.opt_type(self.lr)
-        self.train_op = self.optimizer.minimize(self.loss)
-
         # Generate a loss for each prediction. 
         self.l_optimizers = [ self.opt_type(self.lr) for _ in self.anytime_preds ]
         self.l_train_ops = [ self.l_optimizers[i].minimize(loss) for i, loss in enumerate(self.losses) ]
@@ -333,13 +327,29 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
         self.l_train_op_probs /= np.sum(self.l_train_op_probs)
         self.l_train_op_probs = np.cumsum(self.l_train_op_probs)
 
-        self.eval_result = self.loss
+        # Generate a single loss using sum of losses.
+        self.loss = 0 
+        total_weight = 0
+        for lvl, prob in enumerate(self.l_train_op_probs): 
+            if utils_params['res_add'][lvl// utils_params['width']]:
+                self.loss += self.losses[lvl] * prob
+                total_weight += prob
+        self.loss += self.losses[-1] * total_weight
+
+        # optimization / training
+        self.optimizer = self.opt_type(self.lr)
+        self.train_op = self.optimizer.minimize(self.loss)
+
+        self.anytime_eval_results = self.losses
         if self.eval_type is not None:
-            self.eval_result = self.eval_type(self.pred, self.y_placeholder)
+            self.anytime_eval_results = map(lambda p: self.eval_type(p, self.y_placeholder), self.anytime_preds)
+        self.eval_result = self.anytime_eval_results[-1]
 
         self.saver = tf.train.Saver()
 
-    def training(self):
+    def training(self, is_static):
+        if is_static: 
+            return [ self.train_op ] 
         p = np.random.uniform(0,1)
         indx = np.searchsorted(self.l_train_op_probs, p)
         return [ self.l_train_ops[indx], self.l_train_ops[-1] ]
@@ -375,16 +385,16 @@ def main():
                         'strides': [2, 2], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
         utils_type = ImageAnytimeNN2DUtils
     elif dataset == 'cifar':
-        lr = 1e-1
+        lr = 0.01
         batch_size = 128
         dataset = get_dataset.CIFARDatasetTensorflow(batch_size=batch_size)
         dims = dataset.dims
         mean_type = tf.nn.relu
         loss_type = tf.nn.softmax_cross_entropy_with_logits
-        opt_type = tf.train.AdamOptimizer  # lambda lr : tf.train.MomentumOptimizer(lr, momentum=0.9)
+        opt_type = lambda lr : tf.train.MomentumOptimizer(lr, momentum=0.9)
         eval_type = multi_clf_err
 
-        def build_resnet_params(n=4, init_total_channel=16, width=2):
+        def build_resnet_params(n=5, init_total_channel=32, width=2):
             channels = []
             layer_type = []
             res_add = []
@@ -392,7 +402,7 @@ def main():
             pool_kernel = []
             strides = []
             channel = init_total_channel / width
-            for i in range(4):  # feat map size shrink 4 times.
+            for i in range(3):  # feat map size shrink 4 times.
                 for j in range(n):
                     channels.append(channel)
                     layer_type.append('conv')
@@ -413,7 +423,8 @@ def main():
 
         utils_params = build_resnet_params()
         utils_params.update({'image_side': 24, 'image_channels': 3,
-                             'mean_type': mean_type, 'weak_predictions': 'row_sum', 'pred_sum_gamma': 1.0})
+                             'mean_type': mean_type, 'weak_predictions': 'row_sum', 
+                             'pred_sum_gamma': 1.0})
         utils_type = ImageAnytimeNN2DUtils
 
     # ann = AnytimeNeuralNet(n_layers, dims, utils_type, loss_type, \
@@ -444,9 +455,9 @@ def main():
     shandler = SignalHandler()
 
     # training epochs
-    val_interval = 24000
+    val_interval = 48000
     max_epoch = 2000
-    lr_decay_step = 100
+    lr_decay_step = 80 # Never decays for adam? 
     lr_decay_gamma = 0.1
     t = 0
     last_epoch = -1
@@ -467,7 +478,7 @@ def main():
         actual_batch_size = x.shape[0]
 
         print_sameline('...epoch={},t={}'.format(dataset.epoch, t))
-        sess.run(ann.training(), feed_dict=ann.fill_feed_dict(x, y, lr, kp=1.0))
+        sess.run(ann.training(is_static=True), feed_dict=ann.fill_feed_dict(x, y, lr, kp=1.0))
 
         # Evaluate
         t += actual_batch_size
@@ -508,19 +519,22 @@ def main():
             l_eval_val = []
             for vali in range(n_val_batches):
                 x_val, y_val = dataset.next_test(batch_size, sess)
-                run_ret = sess.run(ann.losses + [ann.evaluation()],
+                run_ret = sess.run(ann.losses + ann.anytime_eval_results,
                              feed_dict=ann.fill_feed_dict(x_val, y_val, lr))
-                losses = run_ret[:-1] 
-                eval_val = run_ret[-1]
+                n_ret = len(run_ret) // 2
+                losses = run_ret[:n_ret] 
+                evals = run_ret[n_ret:]
 
                 assert(not np.isnan(losses[-1]))
                 l_loss_val.append(losses)
-                l_eval_val.append(eval_val)
-            eval_val = np.mean(l_eval_val)
+                l_eval_val.append(evals)
+            evals_val = np.mean(np.array(l_eval_val), axis=0)
             losses_val = np.mean(np.array(l_loss_val), axis=0)
 
             
-            print 'epoch={},t={} \n eval_val={}, losses:'.format(dataset.epoch, t, eval_val)
+            print 'epoch={},t={} \n evals_val:'.format(dataset.epoch, t)
+            print evals_val
+            print 'losses_val:'
             print losses_val
             #print 'last_loss_tra={} eval_tra={}\n'.format(last_loss_tra, eval_tra)
         # ENDIF evaluation
