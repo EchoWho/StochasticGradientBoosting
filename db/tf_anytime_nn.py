@@ -120,6 +120,7 @@ class ImageAnytimeNN2DUtils(object):
             # should not happen (we lost information by going to smaller channel size)
             print "expect channel size to grow and not shrink"
         else:
+            # assert that image size shrinks by half, and the channel size doubles.
             assert(new_dims[1] * 2 == prev_dims[1] and new_dims[2] * 2 == prev_dims[2])
             assert(new_dims[3] == prev_dims[3] * 2)
             px = layers.max_pool2d(px, kernel_size=2, stride=2, padding='SAME')
@@ -347,12 +348,15 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
 
         self.saver = tf.train.Saver()
 
-    def training(self, is_static):
-        if is_static: 
+    def training(self, method='random'):
+        if method == 'static':
             return [ self.train_op ] 
-        p = np.random.uniform(0,1)
-        indx = np.searchsorted(self.l_train_op_probs, p)
-        return [ self.l_train_ops[indx], self.l_train_ops[-1] ]
+        elif method == 'last':
+            return [ self.l_train_ops[-1] ]
+        elif method == 'random':
+            p = np.random.uniform(0,1)
+            indx = np.searchsorted(self.l_train_op_probs, p)
+            return [ self.l_train_ops[indx], self.l_train_ops[-1] ]
 
 def main():
     # ------------- Dataset -------------
@@ -385,7 +389,7 @@ def main():
                         'strides': [2, 2], 'mean_type': mean_type, 'weak_predictions': 'row_sum'}
         utils_type = ImageAnytimeNN2DUtils
     elif dataset == 'cifar':
-        lr = 0.01
+        lr = 0.1
         batch_size = 128
         dataset = get_dataset.CIFARDatasetTensorflow(batch_size=batch_size)
         dims = dataset.dims
@@ -395,20 +399,20 @@ def main():
         eval_type = multi_clf_err
 
         def build_resnet_params(n=5, init_total_channel=32, width=2):
-            channels = []
-            layer_type = []
-            res_add = []
-            conv_kernel = []
-            pool_kernel = []
-            strides = []
             channel = init_total_channel / width
+            channels = [channel]
+            layer_type = ['conv']
+            res_add = [False]
+            conv_kernel = [3]
+            pool_kernel = [1]
+            strides = [1]
             for i in range(3):  # feat map size shrink 4 times.
-                for j in range(n):
+                for j in range(n * 2): # at each channel size, there are 2n conv
                     channels.append(channel)
                     layer_type.append('conv')
                     conv_kernel.append(3)
-                    res_add.append(j % 2 == 0)
-                    if i > 0 and j == 0:
+                    res_add.append(j % 2 == 1)
+                    if channels[-1] != channels[-2]:
                         strides.append(2)
                         pool_kernel.append(2)
                     else:
@@ -416,7 +420,6 @@ def main():
                         pool_kernel.append(1)
                 channel *= 2
 
-            res_add[0] = False
             return {'width': width, 'channels': channels, 'layer_type': layer_type,
                     'res_add': res_add, 'conv_kernel': conv_kernel,
                     'pool_kernel': pool_kernel, 'strides': strides}
@@ -478,7 +481,7 @@ def main():
         actual_batch_size = x.shape[0]
 
         print_sameline('...epoch={},t={}'.format(dataset.epoch, t))
-        sess.run(ann.training(is_static=True), feed_dict=ann.fill_feed_dict(x, y, lr, kp=1.0))
+        sess.run(ann.training(method='last'), feed_dict=ann.fill_feed_dict(x, y, lr, kp=1.0))
 
         # Evaluate
         t += actual_batch_size
