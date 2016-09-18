@@ -398,7 +398,7 @@ def main():
         opt_type = lambda lr : tf.train.MomentumOptimizer(lr, momentum=0.9)
         eval_type = multi_clf_err
 
-        def build_resnet_params(n=5, init_total_channel=32, width=2):
+        def build_resnet_params(n=3, init_total_channel=32, width=2):
             channel = init_total_channel / width
             channels = [channel]
             layer_type = ['conv']
@@ -458,7 +458,7 @@ def main():
     shandler = SignalHandler()
 
     # training epochs
-    val_interval = 48000
+    val_interval = 128000
     max_epoch = 2000
     lr_decay_step = 80 # Never decays for adam? 
     lr_decay_gamma = 0.1
@@ -473,7 +473,6 @@ def main():
         if last_epoch != dataset.epoch:
             print("-----Epoch {:d}-----\n".format(dataset.epoch))
             last_epoch = dataset.epoch
-            t = 0
             if dataset.epoch > 0 and dataset.epoch % lr_decay_step == 0:
                 lr *= lr_decay_gamma
 
@@ -485,7 +484,7 @@ def main():
 
         # Evaluate
         t += actual_batch_size
-        if actual_batch_size < batch_size:
+        if t >= val_interval:
             t = 0
         if t % val_interval == 0 or (dataset.epoch == 0 and t == actual_batch_size and restore_model_path is not None):
             print '\n'
