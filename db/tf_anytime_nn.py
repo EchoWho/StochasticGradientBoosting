@@ -89,10 +89,8 @@ class ImageAnytimeNN2DUtils(object):
         if layer_type == 'conv':
             # assume x is an image [n, h,w,c]
             x = layers.convolution2d(x, num_outputs=self.channels[i],
-                                     kernel_size=self.conv_kernel_sizes[i], stride=1, padding='SAME',
+                                     kernel_size=self.conv_kernel_sizes[i], stride=self.strides[i], padding='SAME',
                                      activation_fn=tf.nn.relu, normalizer_fn=layers.batch_norm)
-            if self.strides[i] > 1:
-                x = layers.max_pool2d(x, kernel_size=self.pool_kernel_sizes[i], stride=self.strides[i], padding='SAME')
         elif layer_type == 'fc':
             # ensure feature is flattened.
             if len(x.get_shape().as_list()) > 2:
@@ -100,16 +98,6 @@ class ImageAnytimeNN2DUtils(object):
             x = layers.fully_connected(x, num_outputs=self.channels[i],
                                        activation_fn=tf.nn.relu, normalizer_fn=layers.batch_norm)
         return x
-        # if i == 0:
-        #  prev_n_chnl = self.init_channel
-        # else:
-        #  prev_n_chnl = self.channels[i-1]
-        #pred, p_var = tf_conv('conv_'+str(i)+'_'+str(j)+'_'+str(k), x, [3,3,prev_n_chnl,self.channels[i]], [1, 1], False)
-        # if self.strides[i] > 1:
-        #  pred = feature_to_square_image(pred, self.channels[i])
-        #  pred = tf.nn.max_pool(pred, ksize=[1,self.strides[i],self.strides[i],1], strides=[1,self.strides[i],self.strides[i],1], padding='SAME')
-        #  pred = tensor_to_feature(pred)
-        # return pred
 
     def res_add(self, nx, px):
         new_dims = nx.get_shape().as_list()
