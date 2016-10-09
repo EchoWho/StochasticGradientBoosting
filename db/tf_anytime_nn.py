@@ -56,13 +56,11 @@ class MNISTAnytimeNNUtils(object):
 
 class ImageAnytimeNN2DUtils(object):
 
-    def __init__(self, params, dims, kp=1.0):
+    def __init__(self, params, dims):
         self.params = {'pred_sum_gamma': 1.0}
         self.params.update(params)
         self.dims = dims
 
-        self.image_side = params['image_side']
-        self.image_channels = params['image_channels']
         self.channels = params['channels']  # [ 16, 32, 64 ]
         self.conv_kernel_sizes = params['conv_kernel']
         self.pool_kernel_sizes = params['pool_kernel']
@@ -72,31 +70,19 @@ class ImageAnytimeNN2DUtils(object):
         self.mean_type = params['mean_type']
         self.init_channel = self.width * self.channels[0]
 
-        self.dropout_weights = tf.ones([self.depth], name='ones_dropout_weight')
-        self.dropout_flag = tf.nn.dropout(self.dropout_weights, kp, name='dropout_weight')
-
-    def preprocess(self, x):
-        x_shape = x.get_shape().as_list()
-        if len(x_shape) != 4:
-            x = feature_to_square_image(x, self.image_channels)
-
-        # Augmentations have to be done on each image separately, and it is better to do so in
-        # get_dataset when each image is read.
-        return x
-
     def generate_one_feature(self, x, i, j, k):
         layer_type = self.params['layer_type'][i]
         if layer_type == 'conv':
             # assume x is an image [n, h,w,c]
             x = layers.convolution2d(x, num_outputs=self.channels[i],
                                      kernel_size=self.conv_kernel_sizes[i], stride=self.strides[i], padding='SAME',
-                                     activation_fn=tf.nn.relu, normalizer_fn=layers.batch_norm)
+                                     activation_fn=tf.identity, normalizer_fn=layers.batch_norm)
         elif layer_type == 'fc':
             # ensure feature is flattened.
             if len(x.get_shape().as_list()) > 2:
                 x = tensor_to_feature(x)
             x = layers.fully_connected(x, num_outputs=self.channels[i],
-                                       activation_fn=tf.nn.relu, normalizer_fn=layers.batch_norm)
+                                       activation_fn=tf.identity, normalizer_fn=layers.batch_norm)
         return x
 
     def res_add(self, nx, px):
@@ -128,7 +114,7 @@ class ImageAnytimeNN2DUtils(object):
                     for k in range(j + 1):
                         feat += self.generate_one_feature(prev_l_feats[k], i, j, k)
                     if self.params['res_add'][i]:
-                        feat = self.res_add(feat * self.dropout_flag[i], ll_feats[i - 2][j])
+                        feat = self.res_add(feat, ll_feats[i - 2][j])
                 feat = self.mean_type(feat)
                 l_feats.append(feat)
             ll_feats.append(l_feats)
@@ -280,8 +266,7 @@ class AnytimeNeuralNet(object):
         else:
             b_size = x.shape[0]
         feed_dict = {self.x_placeholder: x, self.y_placeholder: y,
-                     self.batch_size: b_size, self.lr: lr,
-                     self.dropout_keep_prob: kp}
+                     self.batch_size: b_size, self.lr: lr}
         return feed_dict
 
 
@@ -296,10 +281,11 @@ class AnytimeNeuralNet2D(AnytimeNeuralNet):
         self.x_placeholder = tf.placeholder(tf.float32, shape=(None, dims[0]), name='x_input')
         self.y_placeholder = tf.placeholder(tf.float32, shape=(None, dims[-1]), name='y_label')
         self.lr = tf.placeholder(tf.float32, shape=[], name='lr')
-        self.dropout_keep_prob = tf.placeholder(tf.float32, shape=[], name='dropout_keep_prob')
 
-        self.dataset_utils = utils_type(utils_params, dims, self.dropout_keep_prob)
-        self.x = self.dataset_utils.preprocess(self.x_placeholder)
+        self.dataset_utils = utils_type(utils_params, dims)
+        img_channels = 3
+        img_size = int(np.sqrt(dims[0] / img_channels))
+        self.x = tf.reshape(self.x_placeholder, [-1, img_size, img_size, img_channels]) 
         self.ll_preds = self.dataset_utils.weak_predictions(self.x)
         self.anytime_preds, self.losses = self.dataset_utils.anytime_predictions_and_losses(
             self.ll_preds, loss_type, self.y_placeholder)
@@ -413,8 +399,7 @@ def main():
                     'pool_kernel': pool_kernel, 'strides': strides}
 
         utils_params = build_resnet_params()
-        utils_params.update({'image_side': 24, 'image_channels': 3,
-                             'mean_type': mean_type, 'weak_predictions': 'row_sum', 
+        utils_params.update({'mean_type': mean_type, 'weak_predictions': 'row_sum', 
                              'pred_sum_gamma': 1.0})
         utils_type = ImageAnytimeNN2DUtils
 
@@ -446,7 +431,7 @@ def main():
     shandler = SignalHandler()
 
     # training epochs
-    val_interval = 128000
+    val_interval = 48000
     max_epoch = 2000
     lr_decay_step = 80 # Never decays for adam? 
     lr_decay_gamma = 0.1
@@ -468,7 +453,7 @@ def main():
         actual_batch_size = x.shape[0]
 
         print_sameline('...epoch={},t={}'.format(dataset.epoch, t))
-        sess.run(ann.training(method='last'), feed_dict=ann.fill_feed_dict(x, y, lr, kp=1.0))
+        sess.run(ann.training(method='last'), feed_dict=ann.fill_feed_dict(x, y, lr))
 
         # Evaluate
         t += actual_batch_size
