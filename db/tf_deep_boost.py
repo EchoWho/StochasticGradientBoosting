@@ -643,6 +643,46 @@ def main(online_boost):
         ps_ws_val = 1.0
         reg_lambda = 0.0
         lr_gamma = 0.5
+    
+    elif dataset == 'year':
+        n_nodes = [20, 1]
+        n_lvls = len(n_nodes)
+        mean_types = [tf.nn.relu for lvl in range(n_lvls - 1)]
+        mean_types.append(lambda x: x)
+        loss_types = [square_loss_eltws for lvl in range(n_lvls - 1)]
+        loss_types.append(square_loss_eltws)
+        opt_types = [tf.train.AdamOptimizer for lvl in range(n_lvls)]
+        eval_type = None
+
+        weak_learner_params = {'type': 'res', 'res_inter_dim': x_tra.shape[1]}
+        weak_classification = False
+
+        lr_boost_adam = 1e-3
+        lr_leaf_adam = 1e-2
+        lr_decay_step = x_tra.shape[0] * 50
+        ps_ws_val = 1.0
+        reg_lambda = 0.0
+        lr_gamma = 0.5
+
+    elif dataset == 'abalone':
+        n_nodes = [20, 1]
+        n_lvls = len(n_nodes)
+        mean_types = [tf.nn.relu for lvl in range(n_lvls - 1)]
+        mean_types.append(lambda x: x)
+        loss_types = [square_loss_eltws for lvl in range(n_lvls - 1)]
+        loss_types.append(square_loss_eltws)
+        opt_types = [tf.train.AdamOptimizer for lvl in range(n_lvls)]
+        eval_type = None
+
+        weak_learner_params = {'type': 'res', 'res_inter_dim': x_tra.shape[1]}
+        weak_classification = False
+
+        lr_boost_adam = 1e-3
+        lr_leaf_adam = 1e-3
+        lr_decay_step = x_tra.shape[0] * 50
+        ps_ws_val = 1.0
+        reg_lambda = 0.0
+        lr_gamma = 0.5
 
     else:
         raise Exception('Did not recognize datset: {}'.format(dataset))
@@ -754,48 +794,48 @@ def main(online_boost):
                     val_err.append((global_step, avg_loss, avg_tgt_loss))
 
                     # Plotting the fit.
-                    if dataset == 'arun_1d':
-                        weak_predictions = sess.run(dbg.weak_learner_inference(),
-                                                    feed_dict=dbg.fill_feed_dict(x_val, y_val,
-                                                                                 lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-                        tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts,
-                                        feed_dict=dbg.fill_feed_dict(x_val, y_val,
-                                                                     lr_boost, lr_leaf, ps_ws_val, reg_lambda))
-                        plt.figure(1)
-                        plt.clf()
-                        plt.plot(x_val, y_val, lw=3, color='green', label='GT')
-                        for wi, wpreds in enumerate(weak_predictions):
-                            plt.plot(x_val, -wpreds, label='w' + str(wi))
-                        # for wi, tgt in enumerate(tgts):
-                        #  plt.plot(x_val, -tgt, label='t'+str(wi))
-                        plt.plot(x_val, preds, lw=3, color='blue', label='Yhat')
-                        plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-                        plt.title('deepboost')
-                        plt.tight_layout()
-                        plt.draw()
-                        plt.show(block=False)
+                    #if dataset == 'arun_1d':
+                    #    weak_predictions = sess.run(dbg.weak_learner_inference(),
+                    #                                feed_dict=dbg.fill_feed_dict(x_val, y_val,
+                    #                                                             lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+                    #    tgts = sess.run(dbg.ll_nodes[-1][0].children_tgts,
+                    #                    feed_dict=dbg.fill_feed_dict(x_val, y_val,
+                    #                                                 lr_boost, lr_leaf, ps_ws_val, reg_lambda))
+                    #    plt.figure(1)
+                    #    plt.clf()
+                    #    plt.plot(x_val, y_val, lw=3, color='green', label='GT')
+                    #    for wi, wpreds in enumerate(weak_predictions):
+                    #        plt.plot(x_val, -wpreds, label='w' + str(wi))
+                    #    # for wi, tgt in enumerate(tgts):
+                    #    #  plt.plot(x_val, -tgt, label='t'+str(wi))
+                    #    plt.plot(x_val, preds, lw=3, color='blue', label='Yhat')
+                    #    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+                    #    plt.title('deepboost')
+                    #    plt.tight_layout()
+                    #    plt.draw()
+                    #    plt.show(block=False)
                     print 'epoch={},t={} \n avg_loss={} avg_tgt_loss={} \n loss_tra={} tgt_loss_tra={}'.format(epoch, t, avg_loss, avg_tgt_loss, avg_loss_tra, avg_tgt_loss_tra)
 
-                    if epoch < min_non_ls_epochs:
-                        continue
+                    #if epoch < min_non_ls_epochs:
+                    #    continue
 
-                    if do_line_search:
-                        # restores if is worse than the best multiple times
-                        if avg_loss > best_avg_loss:
-                            worsen_cnt += 1
-                            if worsen_cnt > restore_threshold:
-                                print 'Restore to previous best loss: {}'.format(best_avg_loss)
-                                dbg.saver.restore(sess, best_model_path)
-                                worsen_cnt = 0
-                                max_epoch += 1
-                                lr_boost *= gamma_boost
-                                lr_leaf *= gamma_leaf
-                        else:
-                            worsen_cnt = 0
-                            lr_boost = lr_boost_adam
-                            lr_leaf = lr_leaf_adam
-                            dbg.saver.save(sess, best_model_path)
-                            best_avg_loss = avg_loss
+                    #if do_line_search:
+                    #    # restores if is worse than the best multiple times
+                    #    if avg_loss > best_avg_loss:
+                    #        worsen_cnt += 1
+                    #        if worsen_cnt > restore_threshold:
+                    #            print 'Restore to previous best loss: {}'.format(best_avg_loss)
+                    #            dbg.saver.restore(sess, best_model_path)
+                    #            worsen_cnt = 0
+                    #            max_epoch += 1
+                    #            lr_boost *= gamma_boost
+                    #            lr_leaf *= gamma_leaf
+                    #    else:
+                    #        worsen_cnt = 0
+                    #        lr_boost = lr_boost_adam
+                    #        lr_leaf = lr_leaf_adam
+                    #        dbg.saver.save(sess, best_model_path)
+                    #        best_avg_loss = avg_loss
             # endfor
             # end of epoch, so save out the results so far
             np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix),

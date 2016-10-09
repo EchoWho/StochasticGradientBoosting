@@ -305,6 +305,22 @@ def slice_uci(location='/data/data/slice/slice.npz'):
     y_val = y_all[val_indices]
     return x_tra, y_tra, x_val, y_val
 
+def year_uci(location='/data/data/year/year.npz'):
+    data = np.load(location)
+    x_tra = (data['x_tra'] - data['x_mean'])/data['x_std']
+    y_tra = data['y_tra']
+    x_val = (data['x_val'] - data['x_mean'])/data['x_std']
+    y_val = data['y_val']
+    return x_tra, y_tra, x_val, y_val
+
+def abalone_uci(location='/data/data/abalone/abalone.npz'):
+    data = np.load(location)
+    x_tra = (data['x_tra'] - data['x_mean'])/data['x_std']
+    y_tra = data['y_tra']
+    x_val = (data['x_val'] - data['x_mean'])/data['x_std']
+    y_val = data['y_val']
+    return x_tra, y_tra, x_val, y_val
+
 
 # DEFINE FUNCTIONS THAT RETURN EACH DATASET
 DATASETS = {'arun_1d': arun_1d,
@@ -313,4 +329,6 @@ DATASETS = {'arun_1d': arun_1d,
             'grasp_hog': grasp_hog,
             'a9a': a9a_uci,
             'slice': slice_uci,
+            'year': year_uci,
+            'abalone': abalone_uci,
             }
