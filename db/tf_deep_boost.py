@@ -509,6 +509,8 @@ def main(online_boost):
 
     # default params:
     lr_gamma = 0.3
+    max_epoch = 200
+    batch_weak_learner_max_epoch = 40
 
     if dataset == 'arun_1d':
         n_nodes = [20, 10, 1]
@@ -532,10 +534,12 @@ def main(online_boost):
 
     elif dataset == 'mnist':
         n_nodes = [10, 1]
+        batch_weak_learner_max_epoch = 24
         n_lvls = len(n_nodes)
         mean_types = [tf.nn.relu for lvl in range(n_lvls - 1)]
         mean_types.append(lambda x: x)
-        loss_types = [logistic_loss_eltws for lvl in range(n_lvls - 1)]
+        loss_types = [square_loss_eltws for lvl in range(n_lvls - 1)]
+        #loss_types = [logistic_loss_eltws for lvl in range(n_lvls - 1)]
         loss_types.append(tf.nn.softmax_cross_entropy_with_logits)
 
         opt_types = [tf.train.AdamOptimizer for lvl in range(n_lvls)]
@@ -546,8 +550,8 @@ def main(online_boost):
 
         # mnist lr
         lr_boost_adam = 1e-8
-        lr_leaf_adam = 1e-3
-        lr_decay_step = x_tra.shape[0] * 5
+        lr_leaf_adam = 5e-4
+        lr_decay_step = x_tra.shape[0] * 100
         ps_ws_val = 1.0
         reg_lambda = 0.0
 
@@ -603,9 +607,11 @@ def main(online_boost):
         reg_lambda = 0
 
     elif dataset == 'a9a':
-        n_nodes = [10, 1]
+        n_nodes = [4, 1]
+        batch_weak_learner_max_epoch = 5
+        max_epoch = 50
         n_lvls = len(n_nodes)
-        mean_types = [tf.nn.relu for lvl in range(n_lvls - 1)]
+        mean_types = [tf.nn.sigmoid for lvl in range(n_lvls - 1)]
         mean_types.append(lambda x: x)
         loss_types = [square_loss_eltws for lvl in range(n_lvls - 1)]
         loss_types.append(square_loss_eltws)
@@ -613,39 +619,42 @@ def main(online_boost):
         opt_types = [tf.train.AdamOptimizer for lvl in range(n_lvls)]
         eval_type = logit_binary_clf_err
 
-        weak_learner_params = {'type': 'res', 'res_inter_dim': x_tra.shape[1]}
+        weak_learner_params = {'type': 'res', 'res_inter_dim': 1}
         weak_classification = False
 
         # mnist lr
         lr_boost_adam = 1e-8
-        lr_leaf_adam = 1e-3
+        lr_leaf_adam = 1e-2 #1e-1 for online. 1e-2 for batch
         lr_decay_step = x_tra.shape[0] * 5
         ps_ws_val = 1.0
         reg_lambda = 0.0
 
     elif dataset == 'slice':
-        n_nodes = [15, 1]
+        n_nodes = [7, 1]
+        batch_weak_learner_max_epoch = 20
+        max_epoch = 100
         n_lvls = len(n_nodes)
-        mean_types = [tf.sin for lvl in range(n_lvls - 1)]
+        mean_types = [ lambda x: tf.maximum(0.5*x, x) for lvl in range(n_lvls - 1)]
         mean_types.append(lambda x: x)
         loss_types = [square_loss_eltws for lvl in range(n_lvls - 1)]
         #loss_types = [logistic_loss_eltws for lvl in range(n_lvls-1) ]
         loss_types.append(square_loss_eltws)
-        opt_types = [tf.train.AdamOptimizer for lvl in range(n_lvls)]
+        opt_types = [ tf.train.AdamOptimizer for lvl in range(n_lvls)]
         eval_type = None
 
-        weak_learner_params = {'type': 'res', 'res_inter_dim': x_tra.shape[1]}
+        weak_learner_params = {'type': 'res', 'res_inter_dim': 10}
         weak_classification = False
 
         lr_boost_adam = 1e-3
-        lr_leaf_adam = 1e-2
-        lr_decay_step = x_tra.shape[0] * 4
+        lr_leaf_adam = 5e-3
+        lr_decay_step = x_tra.shape[0] * 3
         ps_ws_val = 1.0
         reg_lambda = 0.0
         lr_gamma = 0.5
     
     elif dataset == 'year':
-        n_nodes = [20, 1]
+        n_nodes = [10, 1]
+        batch_weak_learner_max_epoch = 10
         n_lvls = len(n_nodes)
         mean_types = [tf.nn.relu for lvl in range(n_lvls - 1)]
         mean_types.append(lambda x: x)
@@ -654,32 +663,34 @@ def main(online_boost):
         opt_types = [tf.train.AdamOptimizer for lvl in range(n_lvls)]
         eval_type = None
 
-        weak_learner_params = {'type': 'res', 'res_inter_dim': x_tra.shape[1]}
+        weak_learner_params = {'type': 'res', 'res_inter_dim': 10 }
         weak_classification = False
 
         lr_boost_adam = 1e-3
-        lr_leaf_adam = 1e-2
-        lr_decay_step = x_tra.shape[0] * 50
+        lr_leaf_adam = 1e-3
+        lr_decay_step = x_tra.shape[0] * 200
         ps_ws_val = 1.0
         reg_lambda = 0.0
         lr_gamma = 0.5
 
     elif dataset == 'abalone':
-        n_nodes = [20, 1]
+        n_nodes = [8, 1]
+        batch_weak_learner_max_epoch = 25
+        max_epoch = 100
         n_lvls = len(n_nodes)
-        mean_types = [tf.nn.relu for lvl in range(n_lvls - 1)]
+        mean_types = [tf.nn.sigmoid for lvl in range(n_lvls - 1)]
         mean_types.append(lambda x: x)
         loss_types = [square_loss_eltws for lvl in range(n_lvls - 1)]
         loss_types.append(square_loss_eltws)
         opt_types = [tf.train.AdamOptimizer for lvl in range(n_lvls)]
         eval_type = None
 
-        weak_learner_params = {'type': 'res', 'res_inter_dim': x_tra.shape[1]}
+        weak_learner_params = {'type': 'res', 'res_inter_dim': 1, 'res_add_linear': False}
         weak_classification = False
 
         lr_boost_adam = 1e-3
-        lr_leaf_adam = 1e-3
-        lr_decay_step = x_tra.shape[0] * 50
+        lr_leaf_adam = 1e-2
+        lr_decay_step = x_tra.shape[0] * 1000
         ps_ws_val = 1.0
         reg_lambda = 0.0
         lr_gamma = 0.5
@@ -716,7 +727,6 @@ def main(online_boost):
     # is done. However, to prevent infintie epochs, we set an ultimatum on the number of epochs
     # (max_epoch_ult) that stops this.
     epoch = -1
-    max_epoch = 100
     max_epoch_ult = max_epoch * 2
     batch_size = 64
     val_interval = batch_size * 10
@@ -745,6 +755,7 @@ def main(online_boost):
 
     # Total number of samples
     global_step = 0
+    num_preds = 0
     tra_err = []
     val_err = []
 
@@ -772,6 +783,7 @@ def main(online_boost):
                     t = 0
                 lr_global_step += si_end - si
                 global_step += si_end - si
+                num_preds += (si_end - si) * n_nodes[0]
                 if lr_global_step > lr_decay_step:
                     lr_global_step -= lr_decay_step
                     lr_boost *= lr_gamma
@@ -790,8 +802,8 @@ def main(online_boost):
                                                                                           lr_boost, lr_leaf, ps_ws_val, reg_lambda))
                     assert(not np.isnan(avg_loss))
 
-                    tra_err.append((global_step, avg_loss_tra, avg_tgt_loss_tra))
-                    val_err.append((global_step, avg_loss, avg_tgt_loss))
+                    tra_err.append((global_step, avg_loss_tra, avg_tgt_loss_tra, num_preds))
+                    val_err.append((global_step, avg_loss, avg_tgt_loss, num_preds))
 
                     # Plotting the fit.
                     #if dataset == 'arun_1d':
@@ -838,7 +850,7 @@ def main(online_boost):
                     #        best_avg_loss = avg_loss
             # endfor
             # end of epoch, so save out the results so far
-            np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix),
+            np.savez('../log/err_vs_gstep_{:s}_{:d}.npz'.format(model_name_suffix, n_nodes[0]),
                      tra_err=np.asarray(tra_err), val_err=np.asarray(val_err))
             if dbg.sigint_capture == True:
                 print("----------------------")
@@ -854,14 +866,14 @@ def main(online_boost):
                 t = 0
                 dbg.sigint_capture = False
         # endwhile
-        np.savez('../log/err_vs_gstep_{:s}.npz'.format(model_name_suffix),
+        np.savez('../log/err_vs_gstep_{:s}_{:d}.npz'.format(model_name_suffix, n_nodes[0]),
                  tra_err=np.asarray(tra_err), val_err=np.asarray(val_err))
 
     #### Batch boost####
     else:
 
         for learneri in range(1, n_nodes[0] + 1):
-            max_epoch = 12
+            max_epoch = batch_weak_learner_max_epoch #12
             epoch = -1
             t = 0
             print("---------------------")
@@ -908,6 +920,7 @@ def main(online_boost):
                         t = 0
                     lr_global_step += si_end - si
                     global_step += si_end - si
+                    num_preds += learneri * (si_end - si)
                     if lr_global_step > lr_decay_step:
                         lr_global_step -= lr_decay_step
                         lr_boost *= lr_gamma
@@ -927,8 +940,8 @@ def main(online_boost):
                                      feed_dict=dbg.fill_feed_dict(x_val, y_val,
                                                                   lr_boost, lr_leaf, ps_ws_val, reg_lambda))
 
-                        tra_err.append((global_step, avg_loss_tra, avg_tgt_loss_tra))
-                        val_err.append((global_step, avg_loss, avg_tgt_loss))
+                        tra_err.append((global_step, avg_loss_tra, avg_tgt_loss_tra, num_preds))
+                        val_err.append((global_step, avg_loss, avg_tgt_loss, num_preds))
 
                         assert(not np.isnan(avg_loss))
                         # Plotting the fit.

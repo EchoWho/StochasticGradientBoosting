@@ -282,16 +282,20 @@ def grasp_hog(location='/data/data/GraspDataset/hog/grasp_hog.npz'):
 
 def a9a_uci(location='/data/data/a9a/a9a_scaled_dataset.npz'):
     data = np.load(location)
-    x_tra = data['x_tra']
+    x_mean = data['x_mean']
+    x_std = data['x_std']
+    x_tra = (data['x_tra'] - x_mean) / x_std
     y_tra = data['y_tra']
-    x_val = data['x_test']
+    x_val = (data['x_test'] - x_mean) / x_std
     y_val = data['y_test']
     return x_tra, y_tra, x_val, y_val
 
 
 def slice_uci(location='/data/data/slice/slice.npz'):
     data = np.load(location)
-    x_all = data['x_tra']
+    x_std = data['x_std'] 
+    x_std[ x_std < 1e-6 ] = 1
+    x_all = (data['x_tra'] - data['x_mean']) / x_std
     y_all = data['y_tra']
     n_train = x_all.shape[0]
     all_indices = np.arange(n_train)
