@@ -7,6 +7,9 @@ import matplotlib as mplt
 
 mplt.rc('xtick', labelsize=22)
 mplt.rc('ytick', labelsize=22)
+mplt.rcParams['ps.useafm'] = True
+mplt.rcParams['pdf.use14corefonts'] = True
+mplt.rcParams['text.usetex'] = True
 
 def batchboost_n_samples_to_n_preds(K, v_n_samples):
     l = len(v_n_samples)
@@ -20,10 +23,12 @@ def deepboost_n_samples_to_n_preds(N, v_n_samples):
 def average_end_at(arr, indices, l=5):
     return np.array([ arr[ind-l:ind].mean() for ind in indices ])
 
-def dbfname_to_plot_points(fname, N, traval, col):
+def dbfname_to_plot_points(fname, N, traval, col, Kdb=None):
+    if Kdb is None:
+        Kdb = 50
     d = np.load(fname)
     d_n_preds = deepboost_n_samples_to_n_preds(N, d[traval][:, 0])
-    Kd = d[traval].shape[0] // 50
+    Kd = d[traval].shape[0] // Kdb
     d_select_indices = np.arange(0, d_n_preds.shape[0], Kd) + Kd-1
     if d_select_indices[-1] > d_n_preds.shape[0]-1:
         d_select_indices[-1] = d_n_preds.shape[0] -1
@@ -49,10 +54,11 @@ elif dataset == 'mnist':
 elif dataset == 'slice':
     n_nodes = 7
     col = 2
+    Kdb=25
 elif dataset == 'year':
     n_nodes = 10
     col = 2
-    Kdb = 1000
+    Kdb = 200
     max_db_select = n_nodes
 elif dataset == 'abalone':
     n_nodes = 8
@@ -94,7 +100,7 @@ if plot_all_pts:
 plt.loglog(bb_n_preds[bb_select_indices], average_end_at(bb[traval][:,col], bb_select_indices, 5), marker='o', markersize=12, linewidth=7,label='Batch')
 
 if not ABALONE_VARY_N:
-    x,y = dbfname_to_plot_points(db_log, n_nodes, traval, col)
+    x,y = dbfname_to_plot_points(db_log, n_nodes, traval, col, Kdb=Kdb)
     plt.loglog(x, y, marker='', markersize=12, linewidth=3, label='Streaming')
 
 else: 
