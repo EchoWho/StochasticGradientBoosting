@@ -631,10 +631,10 @@ def main(online_boost):
 
     elif dataset == 'slice':
         n_nodes = [7, 1]
-        batch_weak_learner_max_epoch = 20
+        batch_weak_learner_max_epoch = 25 
         max_epoch = 100
         n_lvls = len(n_nodes)
-        mean_types = [ lambda x: tf.maximum(0.5*x, x) for lvl in range(n_lvls - 1)]
+        mean_types = [ lambda x: tf.maximum(0.3*x, x) for lvl in range(n_lvls - 1)]
         mean_types.append(lambda x: x)
         loss_types = [square_loss_eltws for lvl in range(n_lvls - 1)]
         #loss_types = [logistic_loss_eltws for lvl in range(n_lvls-1) ]
@@ -646,8 +646,8 @@ def main(online_boost):
         weak_classification = False
 
         lr_boost_adam = 1e-3
-        lr_leaf_adam = 5e-3
-        lr_decay_step = x_tra.shape[0] * 3
+        lr_leaf_adam = 1e-2
+        lr_decay_step = x_tra.shape[0] * 4
         ps_ws_val = 1.0
         reg_lambda = 0.0
         lr_gamma = 0.5
@@ -674,7 +674,7 @@ def main(online_boost):
         lr_gamma = 0.5
 
     elif dataset == 'abalone':
-        n_nodes = [8, 1]
+        n_nodes = [3, 1]
         batch_weak_learner_max_epoch = 25
         max_epoch = 100
         n_lvls = len(n_nodes)
