@@ -3,6 +3,5 @@
 
 
 ### Which file should I look at ###
-2. Which file should you look at?
-For experiments in Figure 1 of the paper, please refer to [this file](online_gradient_boosting/Online_Gradient_Boost.py).
+2. For experiments in Figure 1 of the paper, please refer to [this file](online_gradient_boosting/Online_Gradient_Boost.py).
 For experiments in Figure 2 of the paper, please refer to [this file](db/tf_deep_boost.py).
